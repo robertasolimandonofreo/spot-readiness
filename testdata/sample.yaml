@@ -1,0 +1,72 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata: {name: web, namespace: shop}
+spec:
+  replicas: 3
+  selector: {matchLabels: {app: web}}
+  template:
+    metadata: {labels: {app: web}}
+    spec:
+      terminationGracePeriodSeconds: 30
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: topology.kubernetes.io/zone
+          whenUnsatisfiable: ScheduleAnyway
+          labelSelector: {matchLabels: {app: web}}
+      containers:
+        - name: web
+          image: nginx
+          readinessProbe: {httpGet: {path: /, port: 80}}
+          lifecycle: {preStop: {exec: {command: ["sleep", "10"]}}}
+          resources: {requests: {cpu: 500m, memory: 256Mi}}
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata: {name: web, namespace: shop}
+spec:
+  maxUnavailable: 1
+  selector: {matchLabels: {app: web}}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata: {name: worker, namespace: shop}
+spec:
+  replicas: 2
+  selector: {matchLabels: {app: worker}}
+  template:
+    metadata: {labels: {app: worker}}
+    spec:
+      terminationGracePeriodSeconds: 300
+      containers:
+        - name: worker
+          image: busybox
+          resources: {requests: {cpu: "1", memory: 512Mi}}
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata: {name: db, namespace: shop}
+spec:
+  replicas: 1
+  serviceName: db
+  selector: {matchLabels: {app: db}}
+  template:
+    metadata: {labels: {app: db}}
+    spec:
+      containers:
+        - name: db
+          image: postgres
+          resources: {requests: {cpu: "2", memory: 4Gi}}
+  volumeClaimTemplates:
+    - metadata: {name: data}
+      spec: {accessModes: [ReadWriteOnce], resources: {requests: {storage: 10Gi}}}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata: {name: coredns, namespace: kube-system}
+spec:
+  replicas: 2
+  selector: {matchLabels: {app: dns}}
+  template:
+    metadata: {labels: {app: dns}}
+    spec:
+      containers: [{name: dns, image: coredns}]
