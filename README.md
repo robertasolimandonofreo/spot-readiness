@@ -33,7 +33,8 @@ go install github.com/robertasolimandonofreo/spot-readiness/cmd/spot-readiness@l
 spot-readiness scan ./k8s                      # a directory of manifests
 spot-readiness scan -v deployment.yaml         # explain every finding
 helm template my-release ./chart | spot-readiness scan -
-kustomize build overlays/prod | spot-readiness scan -o json -
+kustomize build overlays/prod | spot-readiness scan -f json -
+spot-readiness scan -f csv ./k8s > workloads.csv
 spot-readiness scan --fail-on not-ready ./k8s  # exit 1 in CI
 ```
 
@@ -48,6 +49,10 @@ ready               100    shop/deployment/web     3         1500m  -
 3 workloads: 1 ready, 0 with caveats, 2 not ready
 Spot potential: 27% of requested CPU (workloads ready or with caveats).
 ```
+
+`-f`/`--format` accepts `table` (default), `json` and `csv` (`-o`/`--output` are aliases). CSV has one
+row per workload with the columns `verdict, score, namespace, kind, name, replicas,
+cpu_request_millis, already_on_spot, findings` (rule IDs joined with `;`) and no summary.
 
 `--fail-on` accepts `not-ready` or `caveats`. DaemonSets, Jobs, CronJobs and ReplicaSets are
 counted as skipped. `kube-system`, `kube-public` and `kube-node-lease` are skipped unless you pass
@@ -78,7 +83,7 @@ with that number filled in as the interruption-tolerant share.
 
 ## JSON
 
-`-o json` prints a `summary` and a `results` list with each workload's verdict, score and findings.
+`-f json` prints a `summary` and a `results` list with each workload's verdict, score and findings.
 
 ## Limits
 

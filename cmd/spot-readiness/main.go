@@ -20,7 +20,7 @@ Usage:
   spot-readiness version
 
 Flags for scan:
-  -o, --output string     table (default) or json
+  -f, --format string     table (default), json or csv (-o/--output also work)
   -v, --verbose           explain every finding
       --include-system    also analyze kube-system, kube-public and kube-node-lease
       --fail-on string    exit 1 when a workload is "not-ready" or "caveats" (default: never)
@@ -47,10 +47,11 @@ func main() {
 
 func scan(args []string) int {
 	fs := flag.NewFlagSet("scan", flag.ContinueOnError)
-	var output, failOn string
+	var format, failOn string
 	var verbose, includeSystem bool
-	fs.StringVar(&output, "o", "table", "output format")
-	fs.StringVar(&output, "output", "table", "output format")
+	for _, name := range []string{"f", "format", "o", "output"} {
+		fs.StringVar(&format, name, "table", "output format: table, json or csv")
+	}
 	fs.BoolVar(&verbose, "v", false, "explain findings")
 	fs.BoolVar(&verbose, "verbose", false, "explain findings")
 	fs.BoolVar(&includeSystem, "include-system", false, "include system namespaces")
@@ -62,8 +63,8 @@ func scan(args []string) int {
 		fmt.Fprintln(os.Stderr, "scan needs at least one path (use - for stdin)")
 		return 2
 	}
-	if output != "table" && output != "json" {
-		fmt.Fprintf(os.Stderr, "unknown output %q (use table or json)\n", output)
+	if format != "table" && format != "json" && format != "csv" {
+		fmt.Fprintf(os.Stderr, "unknown format %q (use table, json or csv)\n", format)
 		return 2
 	}
 	if failOn != "" && failOn != "not-ready" && failOn != "caveats" {
@@ -77,9 +78,12 @@ func scan(args []string) int {
 		return 2
 	}
 	rep := report.Build(rules.Analyze(inv, includeSystem), inv.Skipped)
-	if output == "json" {
+	switch format {
+	case "json":
 		err = report.JSON(os.Stdout, rep)
-	} else {
+	case "csv":
+		err = report.CSV(os.Stdout, rep)
+	default:
 		report.Table(os.Stdout, rep, verbose)
 	}
 	if err != nil {

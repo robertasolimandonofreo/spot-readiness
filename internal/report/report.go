@@ -2,9 +2,11 @@
 package report
 
 import (
+	"encoding/csv"
 	"encoding/json"
 	"fmt"
 	"io"
+	"strconv"
 	"strings"
 	"text/tabwriter"
 
@@ -58,6 +60,29 @@ func JSON(w io.Writer, r Report) error {
 	enc := json.NewEncoder(w)
 	enc.SetIndent("", "  ")
 	return enc.Encode(r)
+}
+
+// CSV writes one row per workload. The summary is not included, so the output stays a plain table
+// that spreadsheets and scripts can read. Findings are rule IDs joined with ";".
+func CSV(w io.Writer, r Report) error {
+	cw := csv.NewWriter(w)
+	if err := cw.Write([]string{"verdict", "score", "namespace", "kind", "name", "replicas",
+		"cpu_request_millis", "already_on_spot", "findings"}); err != nil {
+		return err
+	}
+	for _, res := range r.Results {
+		ids := make([]string, 0, len(res.Findings))
+		for _, f := range res.Findings {
+			ids = append(ids, f.Rule)
+		}
+		if err := cw.Write([]string{string(res.Verdict), strconv.Itoa(res.Score), res.Namespace, res.Kind,
+			res.Name, strconv.Itoa(int(res.Replicas)), strconv.FormatInt(res.CPUMilli, 10),
+			strconv.FormatBool(res.OnSpot), strings.Join(ids, ";")}); err != nil {
+			return err
+		}
+	}
+	cw.Flush()
+	return cw.Error()
 }
 
 func Table(w io.Writer, r Report, verbose bool) {
