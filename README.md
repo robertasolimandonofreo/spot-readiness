@@ -96,6 +96,10 @@ line is the marker `<!-- spot-readiness -->`, so a CI step can update its own co
     GH_TOKEN: ${{ github.token }}
 ```
 
+On pull requests from forks, GitHub gives `GITHUB_TOKEN` read-only access, so the comment step
+fails there. Use it for branches in the same repository, or post the report from a separate
+`workflow_run` job.
+
 `--fail-on` accepts `not-ready` or `caveats`. DaemonSets, Jobs, CronJobs and ReplicaSets are
 counted as skipped, and so are workloads scaled to zero (without an HPA minimum), capacity
 placeholders (workloads that only run `pause` containers, for example to make Karpenter create
