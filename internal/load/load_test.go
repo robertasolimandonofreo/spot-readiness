@@ -24,6 +24,10 @@ func TestSampleManifests(t *testing.T) {
 	if s.PotentialPercent != 27 {
 		t.Fatalf("potential = %d%%, want 27%%", s.PotentialPercent)
 	}
+	// The tool prints English, so the link goes to the English calculator page.
+	if want := "https://www.robertasoliman.com/en/tools/kubernetes-savings-calculator?tolerant=27"; s.CalculatorURL != want {
+		t.Fatalf("calculator url = %q, want %q", s.CalculatorURL, want)
+	}
 }
 
 func TestListAndIgnoredDocuments(t *testing.T) {

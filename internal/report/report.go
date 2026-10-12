@@ -13,7 +13,7 @@ import (
 	"github.com/robertasolimandonofreo/spot-readiness/internal/rules"
 )
 
-const calculatorURL = "https://www.robertasoliman.com/ferramentas/calculadora-economia-kubernetes"
+const calculatorURL = "https://www.robertasoliman.com/en/tools/kubernetes-savings-calculator"
 
 type Summary struct {
 	Workloads    int   `json:"workloads"`

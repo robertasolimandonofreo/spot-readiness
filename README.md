@@ -21,6 +21,16 @@ sha256sum -c --ignore-missing checksums.txt
 sudo mv spot-readiness /usr/local/bin/
 ```
 
+Or use the container image (linux/amd64 and linux/arm64):
+
+```bash
+docker run --rm -v "$PWD:/work:ro" ghcr.io/robertasolimandonofreo/spot-readiness:latest scan /work
+```
+
+The image only reads the files you mount. Cluster mode needs a kubeconfig that works without helper
+programs: kubeconfigs that call `aws eks get-token` or `gcloud` do not work inside the image, so
+use the binary for those.
+
 Or build it with Go:
 
 ```bash
@@ -95,7 +105,7 @@ least 50 points.
 
 The "Spot potential" line is the share of requested CPU in workloads that are ready or ready with
 caveats. The link in the output opens the
-[Kubernetes savings calculator](https://www.robertasoliman.com/ferramentas/calculadora-economia-kubernetes)
+[Kubernetes savings calculator](https://www.robertasoliman.com/en/tools/kubernetes-savings-calculator)
 with that number filled in as the interruption-tolerant share.
 
 ## JSON
