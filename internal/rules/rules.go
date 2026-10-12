@@ -189,12 +189,17 @@ func Evaluate(inv *Inventory, w Workload) Result {
 	return res
 }
 
-// Analyze evaluates every workload, skipping system namespaces unless includeSystem is set.
-// Results are ordered worst first.
+// Analyze evaluates every workload, skipping system namespaces unless includeSystem is set, and
+// workloads scaled to zero (nothing runs, so there is nothing to interrupt). Results are ordered
+// worst first.
 func Analyze(inv *Inventory, includeSystem bool) []Result {
 	var out []Result
 	for _, w := range inv.Workloads {
 		if !includeSystem && (w.Namespace == "kube-system" || w.Namespace == "kube-public" || w.Namespace == "kube-node-lease") {
+			inv.Skipped++
+			continue
+		}
+		if w.Kind != "Pod" && w.Replicas == 0 && inv.MinReplicas(w) == 0 {
 			inv.Skipped++
 			continue
 		}

@@ -105,11 +105,19 @@ func addJSON(inv *rules.Inventory, doc []byte) error {
 		if err := decode(&o); err != nil {
 			return err
 		}
+		if o.Name == "" {
+			inv.Skipped++ // an unrendered template, not a real object
+			break
+		}
 		inv.Workloads = append(inv.Workloads, rules.FromDeployment(o))
 	case "StatefulSet":
 		var o appsv1.StatefulSet
 		if err := decode(&o); err != nil {
 			return err
+		}
+		if o.Name == "" {
+			inv.Skipped++ // an unrendered template, not a real object
+			break
 		}
 		inv.Workloads = append(inv.Workloads, rules.FromStatefulSet(o))
 	case "Pod":
@@ -118,7 +126,7 @@ func addJSON(inv *rules.Inventory, doc []byte) error {
 			return err
 		}
 		// A Pod owned by a controller is already covered by that controller.
-		if len(o.OwnerReferences) == 0 {
+		if len(o.OwnerReferences) == 0 && o.Name != "" {
 			inv.Workloads = append(inv.Workloads, rules.FromPod(o))
 		}
 	case "PodDisruptionBudget":

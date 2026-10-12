@@ -170,3 +170,27 @@ func TestOnSpotAndSystemNamespaces(t *testing.T) {
 		t.Fatal("--include-system should keep it")
 	}
 }
+
+func TestScaledToZeroIsSkipped(t *testing.T) {
+	off := healthy()
+	off.Replicas = 0
+	inv := &Inventory{Workloads: []Workload{off, healthy()}}
+	if got := Analyze(inv, false); len(got) != 1 || inv.Skipped != 1 {
+		t.Fatalf("scaled to zero should be skipped: %d results, %d skipped", len(got), inv.Skipped)
+	}
+
+	// An HPA with a minimum above zero means the workload does run.
+	inv = &Inventory{
+		Workloads: []Workload{off},
+		HPAs: []autoscalingv2.HorizontalPodAutoscaler{{
+			ObjectMeta: metav1.ObjectMeta{Namespace: "shop"},
+			Spec: autoscalingv2.HorizontalPodAutoscalerSpec{
+				ScaleTargetRef: autoscalingv2.CrossVersionObjectReference{Kind: "Deployment", Name: "web"},
+				MinReplicas:    i32(2),
+			},
+		}},
+	}
+	if got := Analyze(inv, false); len(got) != 1 {
+		t.Fatalf("workload with an HPA minimum should be analyzed, got %d results", len(got))
+	}
+}

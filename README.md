@@ -55,7 +55,8 @@ row per workload with the columns `verdict, score, namespace, kind, name, replic
 cpu_request_millis, already_on_spot, findings` (rule IDs joined with `;`) and no summary.
 
 `--fail-on` accepts `not-ready` or `caveats`. DaemonSets, Jobs, CronJobs and ReplicaSets are
-counted as skipped. `kube-system`, `kube-public` and `kube-node-lease` are skipped unless you pass
+counted as skipped, and so are workloads scaled to zero (without an HPA minimum) and objects with
+no name, such as unrendered Helm templates. `kube-system`, `kube-public` and `kube-node-lease` are skipped unless you pass
 `--include-system`.
 
 ## Rules

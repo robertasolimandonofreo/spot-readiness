@@ -49,3 +49,23 @@ items:
 		t.Fatalf("got %d workloads, %d skipped, ns %q", len(inv.Workloads), inv.Skipped, inv.Workloads[0].Namespace)
 	}
 }
+
+func TestUnnamedObjectsAreSkipped(t *testing.T) {
+	inv := &rules.Inventory{}
+	doc := `
+apiVersion: apps/v1
+kind: Deployment
+metadata: {}
+spec: {replicas: 2, selector: {matchLabels: {a: a}}, template: {metadata: {labels: {a: a}}, spec: {containers: [{name: a, image: x}]}}}
+---
+apiVersion: v1
+kind: Pod
+spec: {containers: [{name: a, image: x}]}
+`
+	if err := Add(inv, []byte(doc)); err != nil {
+		t.Fatal(err)
+	}
+	if len(inv.Workloads) != 0 || inv.Skipped != 1 {
+		t.Fatalf("got %d workloads, %d skipped; want 0 and 1", len(inv.Workloads), inv.Skipped)
+	}
+}
