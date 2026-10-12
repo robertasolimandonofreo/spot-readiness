@@ -6,8 +6,8 @@ Tells you which Kubernetes workloads can run on Spot capacity, and what to fix i
 are is usually a guess. `spot-readiness` reads your Deployments, StatefulSets and Pods and checks the
 things that decide whether an interruption is a non-event or an outage.
 
-> **Status: v0.1.** It scans YAML/JSON manifests. Reading from a live cluster is planned (see the
-> roadmap). It is a static analysis of configuration, not a guarantee: see [Limits](#limits).
+> **Status: early.** It scans YAML/JSON manifests, or reads a live cluster (read-only). It is a static
+> analysis of configuration, not a guarantee: see [Limits](#limits).
 
 ## Install
 
@@ -38,6 +38,21 @@ spot-readiness scan -f csv ./k8s > workloads.csv
 spot-readiness scan --fail-on not-ready ./k8s  # exit 1 in CI
 ```
 
+### Reading a cluster
+
+With no paths, `scan` reads the cluster from your kubeconfig. It only uses `list` calls.
+
+```bash
+spot-readiness scan                          # current context, all namespaces
+spot-readiness scan --context prod -n shop   # a specific context and namespace
+spot-readiness scan --kubeconfig ./kc.yaml -f csv
+```
+
+The minimum RBAC is `list` on `deployments`, `statefulsets`, `daemonsets` (apps), `pods` (core),
+`jobs` and `cronjobs` (batch), `poddisruptionbudgets` (policy) and `horizontalpodautoscalers`
+(autoscaling). The last three of those are optional: a missing permission only affects the skipped
+count. The tool never creates, changes or deletes anything and sends nothing outside your machine.
+
 Example output:
 
 ```
@@ -55,8 +70,9 @@ row per workload with the columns `verdict, score, namespace, kind, name, replic
 cpu_request_millis, already_on_spot, findings` (rule IDs joined with `;`) and no summary.
 
 `--fail-on` accepts `not-ready` or `caveats`. DaemonSets, Jobs, CronJobs and ReplicaSets are
-counted as skipped, and so are workloads scaled to zero (without an HPA minimum) and objects with
-no name, such as unrendered Helm templates. `kube-system`, `kube-public` and `kube-node-lease` are skipped unless you pass
+counted as skipped, and so are workloads scaled to zero (without an HPA minimum), capacity
+placeholders (workloads that only run `pause` containers, for example to make Karpenter create
+nodes ahead of time) and objects with no name, such as unrendered Helm templates. `kube-system`, `kube-public` and `kube-node-lease` are skipped unless you pass
 `--include-system`.
 
 ## Rules
@@ -99,8 +115,8 @@ with that number filled in as the interruption-tolerant share.
 
 ## Roadmap
 
-- v0.2: read workloads from a live cluster (read-only), Markdown output for pull requests.
-- v0.3: GitHub Action, `kubectl` plugin (krew).
+- Markdown output for pull requests.
+- GitHub Action and `kubectl` plugin (krew).
 - Later: Jobs and CronJobs (checkpointing), Argo Rollouts, KEDA.
 
 ## Development

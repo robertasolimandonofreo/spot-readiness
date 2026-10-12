@@ -3,6 +3,7 @@ package rules
 import (
 	"fmt"
 	"sort"
+	"strings"
 
 	corev1 "k8s.io/api/core/v1"
 )
@@ -195,13 +196,39 @@ func Evaluate(inv *Inventory, w Workload) Result {
 	return res
 }
 
+// isPlaceholder reports workloads made only of "pause" containers. They reserve capacity (for
+// example to make Karpenter create nodes ahead of a cutover) and run no application.
+func isPlaceholder(w Workload) bool {
+	cs := containers(w)
+	if len(cs) == 0 {
+		return false
+	}
+	for _, c := range cs {
+		image := c.Image
+		if i := strings.IndexAny(image, "@"); i >= 0 {
+			image = image[:i]
+		}
+		if i := strings.LastIndex(image, ":"); i > strings.LastIndex(image, "/") {
+			image = image[:i]
+		}
+		if image[strings.LastIndex(image, "/")+1:] != "pause" {
+			return false
+		}
+	}
+	return true
+}
+
 // Analyze evaluates every workload, skipping system namespaces unless includeSystem is set, and
-// workloads scaled to zero (nothing runs, so there is nothing to interrupt). Results are ordered
-// worst first.
+// workloads scaled to zero (nothing runs, so there is nothing to interrupt) and capacity
+// placeholders (pause containers only). Results are ordered worst first.
 func Analyze(inv *Inventory, includeSystem bool) []Result {
 	var out []Result
 	for _, w := range inv.Workloads {
 		if !includeSystem && (w.Namespace == "kube-system" || w.Namespace == "kube-public" || w.Namespace == "kube-node-lease") {
+			inv.Skipped++
+			continue
+		}
+		if isPlaceholder(w) {
 			inv.Skipped++
 			continue
 		}

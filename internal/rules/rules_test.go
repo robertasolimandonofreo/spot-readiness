@@ -199,3 +199,19 @@ func TestScaledToZeroIsSkipped(t *testing.T) {
 		t.Fatalf("want 2 replicas and 1000m, got %d and %dm", got[0].Replicas, got[0].CPUMilli)
 	}
 }
+
+func TestPlaceholdersAreSkipped(t *testing.T) {
+	for _, image := range []string{"registry.k8s.io/pause:3.9", "pause", "registry.k8s.io/pause@sha256:abc", "localhost:5000/pause:3.9"} {
+		ph := healthy()
+		ph.Template.Spec.Containers[0].Image = image
+		inv := &Inventory{Workloads: []Workload{ph}}
+		if got := Analyze(inv, false); len(got) != 0 || inv.Skipped != 1 {
+			t.Fatalf("%q should be skipped as a placeholder: %d results, %d skipped", image, len(got), inv.Skipped)
+		}
+	}
+	real := healthy()
+	real.Template.Spec.Containers[0].Image = "registry.k8s.io/pause-tools:1"
+	if got := Analyze(&Inventory{Workloads: []Workload{real}}, false); len(got) != 1 {
+		t.Fatal("an image that merely starts with pause is a real workload")
+	}
+}
