@@ -155,18 +155,24 @@ func onSpot(w Workload) bool {
 	return sel["karpenter.sh/capacity-type"] == "spot" || sel["eks.amazonaws.com/capacityType"] == "SPOT"
 }
 
-func cpuMilli(w Workload) int64 {
+func cpuMilli(w Workload, replicas int32) int64 {
 	var total int64
 	for _, c := range containers(w) {
 		total += c.Resources.Requests.Cpu().MilliValue()
 	}
-	return total * int64(w.Replicas)
+	return total * int64(replicas)
 }
 
 // Evaluate runs every rule against one workload.
 func Evaluate(inv *Inventory, w Workload) Result {
-	res := Result{Kind: w.Kind, Namespace: w.Namespace, Name: w.Name, Replicas: w.Replicas,
-		CPUMilli: cpuMilli(w), OnSpot: onSpot(w), Score: 100, Verdict: Ready, Findings: []Finding{}}
+	// An HPA can raise the count above spec.replicas (often 0 or unset when an HPA owns it), so
+	// report and weigh the workload by its effective minimum.
+	replicas := w.Replicas
+	if min := inv.MinReplicas(w); min > replicas {
+		replicas = min
+	}
+	res := Result{Kind: w.Kind, Namespace: w.Namespace, Name: w.Name, Replicas: replicas,
+		CPUMilli: cpuMilli(w, replicas), OnSpot: onSpot(w), Score: 100, Verdict: Ready, Findings: []Finding{}}
 	for _, r := range all {
 		if finding := r.check(inv, w); finding != nil {
 			res.Findings = append(res.Findings, *finding)

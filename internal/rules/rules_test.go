@@ -190,7 +190,12 @@ func TestScaledToZeroIsSkipped(t *testing.T) {
 			},
 		}},
 	}
-	if got := Analyze(inv, false); len(got) != 1 {
+	got := Analyze(inv, false)
+	if len(got) != 1 {
 		t.Fatalf("workload with an HPA minimum should be analyzed, got %d results", len(got))
+	}
+	// Replicas and CPU use the HPA minimum, not the 0 in spec.replicas.
+	if got[0].Replicas != 2 || got[0].CPUMilli != 1000 {
+		t.Fatalf("want 2 replicas and 1000m, got %d and %dm", got[0].Replicas, got[0].CPUMilli)
 	}
 }
