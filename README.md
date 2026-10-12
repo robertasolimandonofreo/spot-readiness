@@ -75,9 +75,26 @@ ready               100    shop/deployment/web     3         1500m  -
 Spot potential: 27% of requested CPU (workloads ready or with caveats).
 ```
 
-`-f`/`--format` accepts `table` (default), `json` and `csv` (`-o`/`--output` are aliases). CSV has one
+`-f`/`--format` accepts `table` (default), `json`, `csv` and `markdown` or `md` (`-o`/`--output` are
+aliases). CSV has one
 row per workload with the columns `verdict, score, namespace, kind, name, replicas,
 cpu_request_millis, already_on_spot, findings` (rule IDs joined with `;`) and no summary.
+
+### Pull request comments
+
+`-f markdown` prints a report for a pull request comment: a summary, a table of the workloads that
+need attention (worst first, at most 50 rows) and the rule reference in a collapsed block. The first
+line is the marker `<!-- spot-readiness -->`, so a CI step can update its own comment.
+
+```yaml
+# Example GitHub Actions job (adapt it to your repository)
+- run: |
+    docker run --rm -v "$PWD:/work:ro" ghcr.io/robertasolimandonofreo/spot-readiness:latest \
+      scan -f markdown /work/k8s > report.md
+    gh pr comment ${{ github.event.pull_request.number }} --body-file report.md --edit-last --create-if-none
+  env:
+    GH_TOKEN: ${{ github.token }}
+```
 
 `--fail-on` accepts `not-ready` or `caveats`. DaemonSets, Jobs, CronJobs and ReplicaSets are
 counted as skipped, and so are workloads scaled to zero (without an HPA minimum), capacity
@@ -125,7 +142,6 @@ with that number filled in as the interruption-tolerant share.
 
 ## Roadmap
 
-- Markdown output for pull requests.
 - GitHub Action and `kubectl` plugin (krew).
 - Later: Jobs and CronJobs (checkpointing), Argo Rollouts, KEDA.
 

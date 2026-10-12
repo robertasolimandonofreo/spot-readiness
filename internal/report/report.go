@@ -85,6 +85,68 @@ func CSV(w io.Writer, r Report) error {
 	return cw.Error()
 }
 
+// MarkdownMarker is the first line of the Markdown report. A CI step can search for it to find and
+// update its own pull request comment instead of posting a new one on every push.
+const MarkdownMarker = "<!-- spot-readiness -->"
+
+// maxMarkdownRows keeps the report well under GitHub's 65,536-character comment limit.
+const maxMarkdownRows = 50
+
+func mdCell(v string) string {
+	return strings.NewReplacer("|", "\\|", "\n", " ").Replace(v)
+}
+
+// Markdown writes a report meant for a pull request comment: a summary, a table of the workloads
+// that need attention (worst first, capped), and the rule reference in a collapsed block.
+func Markdown(w io.Writer, r Report) {
+	s := r.Summary
+	fmt.Fprintln(w, MarkdownMarker)
+	fmt.Fprintln(w, "## Spot readiness")
+	fmt.Fprintln(w)
+	fmt.Fprintf(w, "**%d workloads:** %d ready, %d with caveats, %d not ready", s.Workloads, s.Ready, s.Caveats, s.NotReady)
+	if s.Skipped > 0 {
+		fmt.Fprintf(w, " (%d skipped)", s.Skipped)
+	}
+	fmt.Fprintln(w, ".")
+	if s.CPUMilli > 0 {
+		fmt.Fprintf(w, "\nSpot potential: **%d%%** of requested CPU is in workloads that are ready or ready with caveats. [Estimate the savings](%s).\n", s.PotentialPercent, s.CalculatorURL)
+	}
+
+	var attention []rules.Result
+	for _, res := range r.Results {
+		if res.Verdict != rules.Ready {
+			attention = append(attention, res)
+		}
+	}
+	if len(attention) == 0 {
+		fmt.Fprintln(w, "\nNo workload needs attention.")
+	} else {
+		fmt.Fprintln(w, "\n| Verdict | Score | Workload | Replicas | Findings |")
+		fmt.Fprintln(w, "|---|---|---|---|---|")
+		for i, res := range attention {
+			if i == maxMarkdownRows {
+				break
+			}
+			ids := make([]string, 0, len(res.Findings))
+			for _, f := range res.Findings {
+				ids = append(ids, f.Rule)
+			}
+			fmt.Fprintf(w, "| %s | %d | `%s/%s/%s` | %d | %s |\n", res.Verdict, res.Score,
+				mdCell(res.Namespace), strings.ToLower(res.Kind), mdCell(res.Name), res.Replicas, strings.Join(ids, ", "))
+		}
+		if len(attention) > maxMarkdownRows {
+			fmt.Fprintf(w, "\n_%d more workloads not shown. Use `-f csv` or `-f json` for the full list._\n", len(attention)-maxMarkdownRows)
+		}
+	}
+
+	fmt.Fprint(w, "\n<details><summary>Rules</summary>\n\n")
+	for _, d := range rules.Descriptions {
+		fmt.Fprintf(w, "- **%s** (%s): %s\n", d.ID, d.Severity, d.Text)
+	}
+	fmt.Fprintln(w, "\n</details>")
+	fmt.Fprintln(w, "\n_Ready does not mean safe: this tool only sees configuration, not how your application behaves._")
+}
+
 func Table(w io.Writer, r Report, verbose bool) {
 	tw := tabwriter.NewWriter(w, 0, 4, 2, ' ', 0)
 	fmt.Fprintln(tw, "VERDICT\tSCORE\tWORKLOAD\tREPLICAS\tCPU\tSPOT\tFINDINGS")

@@ -25,6 +25,19 @@ const MinCaveatScore = 50
 
 var Penalty = map[Severity]int{Blocker: 50, Caveat: 15, Info: 5}
 
+// Descriptions explain each rule in one line, for reports that list the rules.
+var Descriptions = []struct{ ID, Severity, Text string }{
+	{"SR001", "blocker", "Fewer than 2 replicas (an HPA minimum counts), or a bare Pod"},
+	{"SR002", "blocker", "hostPath volumes: the data is lost with the node"},
+	{"SR003", "caveat", "terminationGracePeriodSeconds above 120s; Spot gives a 2-minute notice"},
+	{"SR004", "caveat", "Several replicas with no topology spread or pod anti-affinity"},
+	{"SR005", "caveat", "Several replicas with no matching PodDisruptionBudget"},
+	{"SR006", "caveat", "A container without a readinessProbe"},
+	{"SR007", "caveat", "Persistent volumes: zonal disks reschedule slower and stay in one zone"},
+	{"SR008", "info", "A container without CPU or memory requests"},
+	{"SR009", "info", "No preStop hook in any container"},
+}
+
 type Finding struct {
 	Rule     string   `json:"rule"`
 	Severity Severity `json:"severity"`

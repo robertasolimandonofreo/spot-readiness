@@ -24,7 +24,7 @@ Usage:
   spot-readiness version
 
 Flags for scan:
-  -f, --format string     table (default), json or csv (-o/--output also work)
+  -f, --format string     table (default), json, csv or markdown (-o/--output also work)
   -v, --verbose           explain every finding
       --include-system    also analyze kube-system, kube-public and kube-node-lease
       --context string    kubeconfig context to read (cluster mode)
@@ -57,7 +57,7 @@ func scan(args []string) int {
 	var format, failOn, kubeContext, kubeconfig, namespace string
 	var verbose, includeSystem bool
 	for _, name := range []string{"f", "format", "o", "output"} {
-		fs.StringVar(&format, name, "table", "output format: table, json or csv")
+		fs.StringVar(&format, name, "table", "output format: table, json, csv or markdown")
 	}
 	fs.BoolVar(&verbose, "v", false, "explain findings")
 	fs.BoolVar(&verbose, "verbose", false, "explain findings")
@@ -75,8 +75,11 @@ func scan(args []string) int {
 		fmt.Fprintln(os.Stderr, "--context, --kubeconfig and --namespace only apply when reading a cluster (no paths)")
 		return 2
 	}
-	if format != "table" && format != "json" && format != "csv" {
-		fmt.Fprintf(os.Stderr, "unknown format %q (use table, json or csv)\n", format)
+	if format == "md" {
+		format = "markdown"
+	}
+	if format != "table" && format != "json" && format != "csv" && format != "markdown" {
+		fmt.Fprintf(os.Stderr, "unknown format %q (use table, json, csv or markdown)\n", format)
 		return 2
 	}
 	if failOn != "" && failOn != "not-ready" && failOn != "caveats" {
@@ -101,6 +104,8 @@ func scan(args []string) int {
 		err = report.JSON(os.Stdout, rep)
 	case "csv":
 		err = report.CSV(os.Stdout, rep)
+	case "markdown":
+		report.Markdown(os.Stdout, rep)
 	default:
 		report.Table(os.Stdout, rep, verbose)
 	}
