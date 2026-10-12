@@ -14,8 +14,10 @@ import (
 
 	appsv1 "k8s.io/api/apps/v1"
 	autoscalingv2 "k8s.io/api/autoscaling/v2"
+	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
 	policyv1 "k8s.io/api/policy/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/yaml"
 
 	"github.com/robertasolimandonofreo/spot-readiness/internal/rules"
@@ -84,8 +86,9 @@ func Add(inv *rules.Inventory, data []byte) error {
 
 func addJSON(inv *rules.Inventory, doc []byte) error {
 	var meta struct {
-		Kind  string            `json:"kind"`
-		Items []json.RawMessage `json:"items"`
+		APIVersion string            `json:"apiVersion"`
+		Kind       string            `json:"kind"`
+		Items      []json.RawMessage `json:"items"`
 	}
 	if err := json.Unmarshal(doc, &meta); err != nil {
 		return err
@@ -141,7 +144,60 @@ func addJSON(inv *rules.Inventory, doc []byte) error {
 			return err
 		}
 		inv.HPAs = append(inv.HPAs, o)
-	case "DaemonSet", "Job", "CronJob", "ReplicaSet":
+	case "Job":
+		var o batchv1.Job
+		if err := decode(&o); err != nil {
+			return err
+		}
+		// A Job created by a CronJob is covered by that CronJob.
+		if len(o.OwnerReferences) > 0 {
+			break
+		}
+		if o.Name == "" {
+			inv.Skipped++
+			break
+		}
+		inv.Workloads = append(inv.Workloads, rules.FromJob(o))
+	case "CronJob":
+		var o batchv1.CronJob
+		if err := decode(&o); err != nil {
+			return err
+		}
+		if o.Name == "" || (o.Spec.Suspend != nil && *o.Spec.Suspend) {
+			inv.Skipped++ // an unrendered template or a suspended schedule
+			break
+		}
+		inv.Workloads = append(inv.Workloads, rules.FromCronJob(o))
+	case "Rollout":
+		if !strings.HasPrefix(meta.APIVersion, "argoproj.io/") {
+			break
+		}
+		var o struct {
+			Metadata metav1.ObjectMeta `json:"metadata"`
+			Spec     rules.RolloutSpec `json:"spec"`
+		}
+		if err := decode(&o); err != nil {
+			return err
+		}
+		w, ok := rules.FromRollout(o.Metadata.Namespace, o.Metadata.Name, o.Spec)
+		if !ok || o.Metadata.Name == "" {
+			inv.Skipped++ // takes its template from a Deployment, which is analyzed instead
+			break
+		}
+		inv.Workloads = append(inv.Workloads, w)
+	case "ScaledObject":
+		if !strings.HasPrefix(meta.APIVersion, "keda.sh/") {
+			break
+		}
+		var o struct {
+			Metadata metav1.ObjectMeta      `json:"metadata"`
+			Spec     rules.ScaledObjectSpec `json:"spec"`
+		}
+		if err := decode(&o); err != nil {
+			return err
+		}
+		inv.Scalers = append(inv.Scalers, rules.ScalerFromScaledObject(o.Metadata.Namespace, o.Spec))
+	case "DaemonSet", "ReplicaSet":
 		inv.Skipped++
 	}
 	return nil

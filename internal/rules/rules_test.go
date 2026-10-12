@@ -215,3 +215,107 @@ func TestPlaceholdersAreSkipped(t *testing.T) {
 		t.Fatal("an image that merely starts with pause is a real workload")
 	}
 }
+
+func healthyJob() Workload {
+	w := healthy()
+	w.Kind = "Job"
+	w.Batch = true
+	w.Replicas = 1
+	w.IgnoresDisruption = true
+	return w
+}
+
+func TestBatchRules(t *testing.T) {
+	zero, six := int32(0), int32(6)
+	deadline := int64(3600)
+	cases := []struct {
+		name   string
+		mutate func(w *Workload)
+		rule   string
+		sev    Severity
+	}{
+		{"backoffLimit 0", func(w *Workload) { w.BackoffLimit = &zero }, "SR010", Blocker},
+		{"default backoffLimit is fine", func(w *Workload) { w.BackoffLimit = nil }, "", ""},
+		{"explicit backoffLimit is fine", func(w *Workload) { w.BackoffLimit = &six }, "", ""},
+		{"active deadline", func(w *Workload) { w.ActiveDeadlineSeconds = &deadline }, "SR011", Caveat},
+		{"no pod failure policy", func(w *Workload) { w.IgnoresDisruption = false }, "SR012", Info},
+		{"hostPath still blocks", func(w *Workload) {
+			w.Template.Spec.Volumes = []corev1.Volume{{Name: "h", VolumeSource: corev1.VolumeSource{HostPath: &corev1.HostPathVolumeSource{Path: "/x"}}}}
+		}, "SR002", Blocker},
+		{"long grace period still applies", func(w *Workload) { w.Template.Spec.TerminationGracePeriodSeconds = i64(300) }, "SR003", Caveat},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			w := healthyJob()
+			c.mutate(&w)
+			got := ids(Evaluate(&Inventory{}, w))
+			if c.rule != "" && got[c.rule] != c.sev {
+				t.Fatalf("want %s as %s, got %v", c.rule, c.sev, got)
+			}
+			if c.rule == "" {
+				for id, sev := range got {
+					if sev != Info {
+						t.Fatalf("unexpected %s %s", id, sev)
+					}
+				}
+			}
+		})
+	}
+}
+
+func TestJobsSkipServiceRules(t *testing.T) {
+	w := healthyJob()
+	w.Template.Spec.Containers[0].ReadinessProbe = nil
+	w.Template.Spec.Containers[0].Lifecycle = nil
+	w.Template.Spec.TopologySpreadConstraints = nil
+	got := ids(Evaluate(&Inventory{}, w))
+	for _, id := range []string{"SR001", "SR004", "SR005", "SR006", "SR009"} {
+		if _, ok := got[id]; ok {
+			t.Errorf("%s is a service rule and must not apply to a Job", id)
+		}
+	}
+	// A clean Job is ready: the only finding is the informational checkpoint note.
+	r := Evaluate(&Inventory{}, healthyJob())
+	if r.Verdict != Ready || r.Score != 95 || len(r.Findings) != 1 || r.Findings[0].Rule != "SR013" {
+		t.Fatalf("clean job: %s/%d/%v", r.Verdict, r.Score, r.Findings)
+	}
+}
+
+func TestServiceRulesSkipBatchOnlyRules(t *testing.T) {
+	got := ids(Evaluate(inventoryWithPDB(), healthy()))
+	for _, id := range []string{"SR010", "SR011", "SR012", "SR013"} {
+		if _, ok := got[id]; ok {
+			t.Errorf("%s is a Job rule and must not apply to a Deployment", id)
+		}
+	}
+}
+
+func TestKEDAMinimumCountsAsReplicas(t *testing.T) {
+	w := healthy()
+	w.Replicas = 1
+	inv := inventoryWithPDB()
+	inv.Scalers = []Scaler{{Namespace: "shop", Kind: "Deployment", Name: "web", MinReplicas: 3}}
+	if _, blocked := ids(Evaluate(inv, w))["SR001"]; blocked {
+		t.Fatal("a ScaledObject with minReplicaCount 3 should lift the single-replica blocker")
+	}
+	inv.Scalers[0].MinReplicas = 0
+	if got := ids(Evaluate(inv, w)); got["SR001"] != Blocker {
+		t.Fatalf("minReplicaCount 0 should block, got %v", got)
+	}
+}
+
+func TestScalerDefaults(t *testing.T) {
+	var spec ScaledObjectSpec
+	spec.ScaleTargetRef.Name = "api"
+	sc := ScalerFromScaledObject("shop", spec)
+	if sc.Kind != "Deployment" || sc.MinReplicas != 0 || sc.Name != "api" {
+		t.Fatalf("defaults: %+v", sc)
+	}
+	w, ok := FromRollout("shop", "web", RolloutSpec{})
+	if !ok || w.Kind != "Rollout" || w.Replicas != 1 {
+		t.Fatalf("rollout defaults: %+v ok=%v", w, ok)
+	}
+	if _, ok := FromRollout("shop", "web", RolloutSpec{WorkloadRef: []byte(`{"name":"x"}`)}); ok {
+		t.Fatal("a Rollout with workloadRef must be skipped")
+	}
+}

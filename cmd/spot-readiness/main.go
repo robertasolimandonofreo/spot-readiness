@@ -122,12 +122,12 @@ func scan(args []string) int {
 }
 
 func scanCluster(kubeconfig, kubeContext, namespace string) (*rules.Inventory, error) {
-	client, name, err := cluster.Connect(cluster.Options{Kubeconfig: kubeconfig, Context: kubeContext, Namespace: namespace})
+	clients, name, err := cluster.Connect(cluster.Options{Kubeconfig: kubeconfig, Context: kubeContext, Namespace: namespace})
 	if err != nil {
 		return nil, err
 	}
 	fmt.Fprintf(os.Stderr, "reading cluster %q (read-only)\n", name)
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 	defer cancel()
-	return cluster.Load(ctx, client, namespace)
+	return cluster.Load(ctx, clients, namespace)
 }

@@ -3,8 +3,8 @@
 Tells you which Kubernetes workloads can run on Spot capacity, and what to fix in the ones that cannot.
 
 "Use Spot for interruption-tolerant workloads" is common advice. Finding out which workloads those
-are is usually a guess. `spot-readiness` reads your Deployments, StatefulSets and Pods and checks the
-things that decide whether an interruption is a non-event or an outage.
+are is usually a guess. `spot-readiness` reads your Deployments, StatefulSets, Argo Rollouts, Jobs, CronJobs and Pods and
+checks the things that decide whether an interruption is a non-event or an outage.
 
 > **Status: early.** It scans YAML/JSON manifests, or reads a live cluster (read-only). It is a static
 > analysis of configuration, not a guarantee: see [Limits](#limits).
@@ -60,8 +60,9 @@ spot-readiness scan --kubeconfig ./kc.yaml -f csv
 
 The minimum RBAC is `list` on `deployments`, `statefulsets`, `daemonsets` (apps), `pods` (core),
 `jobs` and `cronjobs` (batch), `poddisruptionbudgets` (policy) and `horizontalpodautoscalers`
-(autoscaling). The last three of those are optional: a missing permission only affects the skipped
-count. The tool never creates, changes or deletes anything and sends nothing outside your machine.
+(autoscaling). Argo Rollouts (`rollouts`) and KEDA (`scaledobjects`) are read too when those CRDs
+exist. Everything except Deployments, StatefulSets and Pods is optional: a missing permission or
+CRD only means that part is not analyzed. The tool never creates, changes or deletes anything and sends nothing outside your machine.
 
 Example output:
 
@@ -100,11 +101,12 @@ On pull requests from forks, GitHub gives `GITHUB_TOKEN` read-only access, so th
 fails there. Use it for branches in the same repository, or post the report from a separate
 `workflow_run` job.
 
-`--fail-on` accepts `not-ready` or `caveats`. DaemonSets, Jobs, CronJobs and ReplicaSets are
-counted as skipped, and so are workloads scaled to zero (without an HPA minimum), capacity
-placeholders (workloads that only run `pause` containers, for example to make Karpenter create
-nodes ahead of time) and objects with no name, such as unrendered Helm templates. `kube-system`, `kube-public` and `kube-node-lease` are skipped unless you pass
-`--include-system`.
+`--fail-on` accepts `not-ready` or `caveats`. DaemonSets and ReplicaSets are counted as skipped, and
+so are workloads scaled to zero (without an HPA or KEDA minimum), suspended CronJobs, finished Jobs
+(in a cluster), Jobs created by a CronJob (the CronJob is analyzed instead), capacity placeholders
+(workloads that only run `pause` containers, for example to make Karpenter create nodes ahead of
+time), Rollouts that use `workloadRef` and objects with no name, such as unrendered Helm templates.
+`kube-system`, `kube-public` and `kube-node-lease` are skipped unless you pass `--include-system`.
 
 ## Rules
 
@@ -123,9 +125,18 @@ least 50 points.
 | SR007 | caveat | Persistent volumes (zonal disks reschedule slower and stay in one zone) |
 | SR008 | info | A container without CPU or memory requests |
 | SR009 | info | No `preStop` hook in any container |
+| SR010 | blocker | Job with `backoffLimit: 0`: one lost pod fails the whole job |
+| SR011 | caveat | Job with `activeDeadlineSeconds`: retries after an interruption count against it |
+| SR012 | info | No `podFailurePolicy` that ignores `DisruptionTarget`: an interruption can count against `backoffLimit` |
+| SR013 | info | Progress is lost on interruption unless the job checkpoints (cannot be verified) |
 
-The "Spot potential" line is the share of requested CPU in workloads that are ready or ready with
-caveats. The link in the output opens the
+SR001, SR004, SR005, SR006 and SR009 apply to long-running workloads (Deployments, StatefulSets,
+Argo Rollouts and bare Pods). SR010 to SR013 apply to Jobs and CronJobs. SR002, SR003, SR007 and
+SR008 apply to all of them.
+
+The "Spot potential" line is the share of requested CPU in long-running workloads that are ready or
+ready with caveats. Jobs and CronJobs are not counted: they request CPU only while they run, so
+weighing them like always-on services would overstate their share. The link in the output opens the
 [Kubernetes savings calculator](https://www.robertasoliman.com/en/tools/kubernetes-savings-calculator)
 with that number filled in as the interruption-tolerant share.
 
@@ -135,6 +146,11 @@ with that number filled in as the interruption-tolerant share.
 
 ## Limits
 
+- **Jobs.** The tool cannot see whether a job checkpoints its progress, so a "ready" Job can still
+  lose hours of work when it is interrupted (SR013 reminds you of this).
+- **Argo Rollouts and KEDA.** A Rollout that takes its pod template from a Deployment
+  (`workloadRef`) is skipped, and that Deployment is analyzed instead. A KEDA ScaledObject sets the
+  minimum replica count (its default is 0), the same way an HPA does.
 - **Ready does not mean safe.** The tool only sees configuration. It cannot know whether your
   application handles `SIGTERM`, keeps state in memory or tolerates a restart.
 - Rules are heuristics. A workload can pass every rule and still be a bad fit for Spot, or fail a
@@ -147,7 +163,7 @@ with that number filled in as the interruption-tolerant share.
 ## Roadmap
 
 - GitHub Action and `kubectl` plugin (krew).
-- Later: Jobs and CronJobs (checkpointing), Argo Rollouts, KEDA.
+- Later: ScaledJob (KEDA), Argo Rollouts that use `workloadRef`, detecting checkpointing.
 
 ## Development
 

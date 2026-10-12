@@ -16,15 +16,19 @@ import (
 const calculatorURL = "https://www.robertasoliman.com/en/tools/kubernetes-savings-calculator"
 
 type Summary struct {
-	Workloads    int   `json:"workloads"`
-	Ready        int   `json:"ready"`
-	Caveats      int   `json:"readyWithCaveats"`
-	NotReady     int   `json:"notReady"`
-	Skipped      int   `json:"skipped"`
+	Workloads int `json:"workloads"`
+	// Batch counts the Jobs and CronJobs among the workloads.
+	Batch    int `json:"batch"`
+	Ready    int `json:"ready"`
+	Caveats  int `json:"readyWithCaveats"`
+	NotReady int `json:"notReady"`
+	Skipped  int `json:"skipped"`
+	// CPUMilli and PotentialCPU cover long-running workloads only. Jobs and CronJobs request CPU
+	// only while they run, so counting them like always-on services would overstate their weight.
 	CPUMilli     int64 `json:"cpuRequestMillis"`
 	PotentialCPU int64 `json:"spotPotentialCpuMillis"`
-	// PotentialPercent is the share of requested CPU in workloads that are ready or ready with
-	// caveats. It is an upper bound, not a promise: see the README.
+	// PotentialPercent is the share of requested CPU in long-running workloads that are ready or
+	// ready with caveats. It is an upper bound, not a promise: see the README.
 	PotentialPercent int    `json:"spotPotentialPercent"`
 	CalculatorURL    string `json:"calculatorUrl,omitempty"`
 }
@@ -37,14 +41,22 @@ type Report struct {
 func Build(results []rules.Result, skipped int) Report {
 	s := Summary{Workloads: len(results), Skipped: skipped}
 	for _, r := range results {
-		s.CPUMilli += r.CPUMilli
+		if r.Batch {
+			s.Batch++
+		} else {
+			s.CPUMilli += r.CPUMilli
+		}
 		switch r.Verdict {
 		case rules.Ready:
 			s.Ready++
-			s.PotentialCPU += r.CPUMilli
+			if !r.Batch {
+				s.PotentialCPU += r.CPUMilli
+			}
 		case rules.Caveats:
 			s.Caveats++
-			s.PotentialCPU += r.CPUMilli
+			if !r.Batch {
+				s.PotentialCPU += r.CPUMilli
+			}
 		case rules.NotReady:
 			s.NotReady++
 		}
@@ -109,7 +121,7 @@ func Markdown(w io.Writer, r Report) {
 	}
 	fmt.Fprintln(w, ".")
 	if s.CPUMilli > 0 {
-		fmt.Fprintf(w, "\nSpot potential: **%d%%** of requested CPU is in workloads that are ready or ready with caveats. [Estimate the savings](%s).\n", s.PotentialPercent, s.CalculatorURL)
+		fmt.Fprintf(w, "\nSpot potential: **%d%%** of requested CPU is in long-running workloads that are ready or ready with caveats (Jobs and CronJobs are not counted). [Estimate the savings](%s).\n", s.PotentialPercent, s.CalculatorURL)
 	}
 
 	var attention []rules.Result
@@ -184,7 +196,7 @@ func Table(w io.Writer, r Report, verbose bool) {
 	}
 	fmt.Fprintln(w)
 	if s.CPUMilli > 0 {
-		fmt.Fprintf(w, "Spot potential: %d%% of requested CPU (workloads ready or with caveats).\n", s.PotentialPercent)
+		fmt.Fprintf(w, "Spot potential: %d%% of requested CPU in long-running workloads (ready or with caveats; Jobs and CronJobs excluded).\n", s.PotentialPercent)
 		fmt.Fprintf(w, "Estimate the savings: %s\n", s.CalculatorURL)
 	}
 	fmt.Fprintln(w, "Ready does not mean safe: this tool only sees configuration, not how your application behaves.")

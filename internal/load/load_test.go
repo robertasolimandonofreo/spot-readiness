@@ -73,3 +73,90 @@ spec: {containers: [{name: a, image: x}]}
 		t.Fatalf("got %d workloads, %d skipped; want 0 and 1", len(inv.Workloads), inv.Skipped)
 	}
 }
+
+func TestBatchRolloutAndKEDA(t *testing.T) {
+	inv := &rules.Inventory{}
+	doc := `
+apiVersion: batch/v1
+kind: CronJob
+metadata: {name: nightly, namespace: jobs}
+spec:
+  schedule: "0 3 * * *"
+  jobTemplate:
+    spec:
+      backoffLimit: 0
+      parallelism: 2
+      template:
+        spec:
+          restartPolicy: Never
+          containers: [{name: a, image: x, resources: {requests: {cpu: 500m, memory: 1Gi}}}]
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata: {name: paused, namespace: jobs}
+spec:
+  suspend: true
+  schedule: "0 3 * * *"
+  jobTemplate: {spec: {template: {spec: {containers: [{name: a, image: x}]}}}}
+---
+apiVersion: batch/v1
+kind: Job
+metadata: {name: owned, namespace: jobs, ownerReferences: [{apiVersion: batch/v1, kind: CronJob, name: nightly, uid: u}]}
+spec: {template: {spec: {containers: [{name: a, image: x}]}}}
+---
+apiVersion: batch/v1
+kind: Job
+metadata: {name: migrate, namespace: jobs}
+spec:
+  podFailurePolicy:
+    rules:
+      - action: Ignore
+        onPodConditions: [{type: DisruptionTarget}]
+  template: {spec: {containers: [{name: a, image: x}]}}
+---
+apiVersion: argoproj.io/v1alpha1
+kind: Rollout
+metadata: {name: web, namespace: shop}
+spec:
+  replicas: 3
+  template: {metadata: {labels: {app: web}}, spec: {containers: [{name: web, image: x, resources: {requests: {cpu: 250m, memory: 64Mi}}}]}}
+---
+apiVersion: argoproj.io/v1alpha1
+kind: Rollout
+metadata: {name: ref, namespace: shop}
+spec: {workloadRef: {apiVersion: apps/v1, kind: Deployment, name: web}}
+---
+apiVersion: example.com/v1
+kind: Rollout
+metadata: {name: other}
+spec: {}
+---
+apiVersion: keda.sh/v1alpha1
+kind: ScaledObject
+metadata: {name: api, namespace: shop}
+spec: {scaleTargetRef: {name: api}, minReplicaCount: 2}
+`
+	if err := Add(inv, []byte(doc)); err != nil {
+		t.Fatal(err)
+	}
+	names := map[string]rules.Workload{}
+	for _, w := range inv.Workloads {
+		names[w.Kind+"/"+w.Name] = w
+	}
+	if len(inv.Workloads) != 3 || names["CronJob/nightly"].Name == "" || names["Job/migrate"].Name == "" || names["Rollout/web"].Name == "" {
+		t.Fatalf("workloads: %v", names)
+	}
+	if inv.Skipped != 2 { // the suspended CronJob and the Rollout with workloadRef
+		t.Fatalf("skipped = %d, want 2", inv.Skipped)
+	}
+	cron := names["CronJob/nightly"]
+	if !cron.Batch || cron.Replicas != 2 || cron.BackoffLimit == nil || *cron.BackoffLimit != 0 {
+		t.Fatalf("cronjob: %+v", cron)
+	}
+	if !names["Job/migrate"].IgnoresDisruption {
+		t.Fatal("podFailurePolicy that ignores DisruptionTarget was not detected")
+	}
+	if len(inv.Scalers) != 1 || inv.Scalers[0].Kind != "Deployment" || inv.Scalers[0].MinReplicas != 2 {
+		t.Fatalf("scalers: %+v", inv.Scalers)
+	}
+}

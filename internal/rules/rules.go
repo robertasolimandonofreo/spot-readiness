@@ -36,6 +36,10 @@ var Descriptions = []struct{ ID, Severity, Text string }{
 	{"SR007", "caveat", "Persistent volumes: zonal disks reschedule slower and stay in one zone"},
 	{"SR008", "info", "A container without CPU or memory requests"},
 	{"SR009", "info", "No preStop hook in any container"},
+	{"SR010", "blocker", "Job with backoffLimit 0: a single lost pod fails the whole job"},
+	{"SR011", "caveat", "Job with activeDeadlineSeconds: retries after an interruption count against the deadline"},
+	{"SR012", "info", "Job without a podFailurePolicy that ignores DisruptionTarget: interruptions can count as failures"},
+	{"SR013", "info", "Job progress is lost on interruption unless the job checkpoints (cannot be verified)"},
 }
 
 type Finding struct {
@@ -53,19 +57,30 @@ const (
 )
 
 type Result struct {
-	Kind      string    `json:"kind"`
-	Namespace string    `json:"namespace"`
-	Name      string    `json:"name"`
-	Replicas  int32     `json:"replicas"`
-	CPUMilli  int64     `json:"cpuRequestMillis"`
-	OnSpot    bool      `json:"alreadyOnSpot"`
-	Score     int       `json:"score"`
-	Verdict   Verdict   `json:"verdict"`
-	Findings  []Finding `json:"findings"`
+	Kind      string `json:"kind"`
+	Namespace string `json:"namespace"`
+	Name      string `json:"name"`
+	Replicas  int32  `json:"replicas"`
+	// Batch is true for Jobs and CronJobs, which are left out of the Spot potential.
+	Batch    bool      `json:"batch"`
+	CPUMilli int64     `json:"cpuRequestMillis"`
+	OnSpot   bool      `json:"alreadyOnSpot"`
+	Score    int       `json:"score"`
+	Verdict  Verdict   `json:"verdict"`
+	Findings []Finding `json:"findings"`
 }
+
+type scope int
+
+const (
+	scopeAll     scope = iota // every workload
+	scopeService              // long-running services: Deployment, StatefulSet, Rollout, Pod
+	scopeBatch                // Jobs and CronJobs
+)
 
 type rule struct {
 	id    string
+	scope scope
 	check func(inv *Inventory, w Workload) *Finding
 }
 
@@ -76,7 +91,7 @@ func f(id string, s Severity, format string, args ...any) *Finding {
 func containers(w Workload) []corev1.Container { return w.Template.Spec.Containers }
 
 var all = []rule{
-	{"SR001", func(inv *Inventory, w Workload) *Finding {
+	{"SR001", scopeService, func(inv *Inventory, w Workload) *Finding {
 		if w.Kind == "Pod" {
 			return f("SR001", Blocker, "bare Pod: nothing recreates it after an interruption")
 		}
@@ -85,7 +100,7 @@ var all = []rule{
 		}
 		return nil
 	}},
-	{"SR002", func(_ *Inventory, w Workload) *Finding {
+	{"SR002", scopeAll, func(_ *Inventory, w Workload) *Finding {
 		for _, v := range w.Template.Spec.Volumes {
 			if v.HostPath != nil {
 				return f("SR002", Blocker, "hostPath volume %q: its data is lost with the node", v.Name)
@@ -93,7 +108,7 @@ var all = []rule{
 		}
 		return nil
 	}},
-	{"SR003", func(_ *Inventory, w Workload) *Finding {
+	{"SR003", scopeAll, func(_ *Inventory, w Workload) *Finding {
 		grace := int64(30)
 		if g := w.Template.Spec.TerminationGracePeriodSeconds; g != nil {
 			grace = *g
@@ -103,7 +118,7 @@ var all = []rule{
 		}
 		return nil
 	}},
-	{"SR004", func(inv *Inventory, w Workload) *Finding {
+	{"SR004", scopeService, func(inv *Inventory, w Workload) *Finding {
 		if inv.MinReplicas(w) <= 1 && w.Replicas <= 1 {
 			return nil
 		}
@@ -116,7 +131,7 @@ var all = []rule{
 		}
 		return nil
 	}},
-	{"SR005", func(inv *Inventory, w Workload) *Finding {
+	{"SR005", scopeService, func(inv *Inventory, w Workload) *Finding {
 		if inv.MinReplicas(w) <= 1 && w.Replicas <= 1 {
 			return nil
 		}
@@ -125,7 +140,7 @@ var all = []rule{
 		}
 		return nil
 	}},
-	{"SR006", func(_ *Inventory, w Workload) *Finding {
+	{"SR006", scopeService, func(_ *Inventory, w Workload) *Finding {
 		for _, c := range containers(w) {
 			if c.ReadinessProbe == nil {
 				return f("SR006", Caveat, "container %q has no readinessProbe: traffic can reach a pod that is not ready", c.Name)
@@ -133,7 +148,7 @@ var all = []rule{
 		}
 		return nil
 	}},
-	{"SR007", func(_ *Inventory, w Workload) *Finding {
+	{"SR007", scopeAll, func(_ *Inventory, w Workload) *Finding {
 		claims := w.ClaimTemplates
 		for _, v := range w.Template.Spec.Volumes {
 			if v.PersistentVolumeClaim != nil {
@@ -145,7 +160,7 @@ var all = []rule{
 		}
 		return nil
 	}},
-	{"SR008", func(_ *Inventory, w Workload) *Finding {
+	{"SR008", scopeAll, func(_ *Inventory, w Workload) *Finding {
 		for _, c := range containers(w) {
 			r := c.Resources.Requests
 			if r.Cpu().IsZero() || r.Memory().IsZero() {
@@ -154,13 +169,38 @@ var all = []rule{
 		}
 		return nil
 	}},
-	{"SR009", func(_ *Inventory, w Workload) *Finding {
+	{"SR009", scopeService, func(_ *Inventory, w Workload) *Finding {
 		for _, c := range containers(w) {
 			if c.Lifecycle != nil && c.Lifecycle.PreStop != nil {
 				return nil
 			}
 		}
 		return f("SR009", Info, "no preStop hook: in-flight requests may be cut when the node is reclaimed")
+	}},
+	{"SR010", scopeBatch, func(_ *Inventory, w Workload) *Finding {
+		limit := int32(6) // the Kubernetes default
+		if w.BackoffLimit != nil {
+			limit = *w.BackoffLimit
+		}
+		if limit == 0 {
+			return f("SR010", Blocker, "backoffLimit is 0: a single lost pod fails the whole job")
+		}
+		return nil
+	}},
+	{"SR011", scopeBatch, func(_ *Inventory, w Workload) *Finding {
+		if w.ActiveDeadlineSeconds != nil {
+			return f("SR011", Caveat, "activeDeadlineSeconds is %ds: time spent retrying after an interruption counts against it", *w.ActiveDeadlineSeconds)
+		}
+		return nil
+	}},
+	{"SR012", scopeBatch, func(_ *Inventory, w Workload) *Finding {
+		if !w.IgnoresDisruption {
+			return f("SR012", Info, "no podFailurePolicy that ignores DisruptionTarget: a pod lost to an interruption can count against backoffLimit")
+		}
+		return nil
+	}},
+	{"SR013", scopeBatch, func(_ *Inventory, _ Workload) *Finding {
+		return f("SR013", Info, "progress is lost on interruption unless the job checkpoints; the tool cannot verify that")
 	}},
 }
 
@@ -185,9 +225,12 @@ func Evaluate(inv *Inventory, w Workload) Result {
 	if min := inv.MinReplicas(w); min > replicas {
 		replicas = min
 	}
-	res := Result{Kind: w.Kind, Namespace: w.Namespace, Name: w.Name, Replicas: replicas,
+	res := Result{Kind: w.Kind, Namespace: w.Namespace, Name: w.Name, Replicas: replicas, Batch: w.Batch,
 		CPUMilli: cpuMilli(w, replicas), OnSpot: onSpot(w), Score: 100, Verdict: Ready, Findings: []Finding{}}
 	for _, r := range all {
+		if (r.scope == scopeBatch && !w.Batch) || (r.scope == scopeService && w.Batch) {
+			continue
+		}
 		if finding := r.check(inv, w); finding != nil {
 			res.Findings = append(res.Findings, *finding)
 			res.Score -= Penalty[finding.Severity]
