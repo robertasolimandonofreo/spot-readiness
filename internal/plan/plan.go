@@ -63,9 +63,11 @@ type Plan struct {
 }
 
 // structural reports the findings that configuration cannot fix: data that lives on the node
-// (hostPath) and stateful workloads with persistent volumes. Those stay on on-demand capacity.
-func structural(kind string, f rules.Finding) bool {
-	return f.Rule == "SR002" || (f.Rule == "SR007" && kind == "StatefulSet")
+// (hostPath), stateful workloads with persistent volumes, and a workload that has persistent
+// volumes and runs a single replica (a volume usually attaches to one pod, so adding replicas is not
+// a configuration change). Those stay on on-demand capacity.
+func structural(kind string, rulesSeen map[string]bool, f rules.Finding) bool {
+	return f.Rule == "SR002" || (f.Rule == "SR007" && (kind == "StatefulSet" || rulesSeen["SR001"]))
 }
 
 func firstLine(s string) string {
@@ -94,10 +96,18 @@ func Build(results []rules.Result, prerequisites []string) Plan {
 		e := Entry{Namespace: r.Namespace, Kind: r.Kind, Name: r.Name, Batch: r.Batch, Replicas: r.Replicas,
 			CPUMilli: r.CPUMilli, Score: r.Score, OnSpot: r.OnSpot}
 		var reasons []string
+		seen := map[string]bool{}
+		for _, f := range r.Findings {
+			seen[f.Rule] = true
+		}
 		for _, f := range r.Findings {
 			switch {
-			case structural(r.Kind, f):
-				reasons = append(reasons, f.Message)
+			case structural(r.Kind, seen, f):
+				msg := f.Message
+				if f.Rule == "SR007" && r.Kind != "StatefulSet" && seen["SR001"] {
+					msg += "; it runs a single replica, and a volume usually attaches to one pod"
+				}
+				reasons = append(reasons, msg)
 			case f.Severity != rules.Info:
 				e.Changes = append(e.Changes, Change{Rule: f.Rule, Severity: string(f.Severity),
 					Action: firstLine(f.Remediation), Remediation: f.Remediation})

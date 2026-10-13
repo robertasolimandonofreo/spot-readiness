@@ -301,8 +301,10 @@ Workloads fall in three groups:
   Listed safest first (highest score, then the most CPU).
 - **Ready after changes** (phase 2): blockers or caveats, but none that configuration cannot fix.
   Each change is the first line of the finding's suggested fix. Listed with the fewest changes first.
-- **Keep on on-demand**: data that lives on the node (SR002, `hostPath`) or a StatefulSet with
-  persistent volumes (SR007). Moving those is a design decision, not a configuration fix.
+- **Keep on on-demand**: data that lives on the node (SR002, `hostPath`), a StatefulSet with
+  persistent volumes (SR007), or any workload with persistent volumes that runs a single replica
+  (a database run as a Deployment, for example: a volume usually attaches to one pod, so adding
+  replicas is not a configuration fix). Moving those is a design decision.
 
 The CPU figures cover long-running workloads, like the Spot potential of `scan`: Jobs and CronJobs
 are listed in the phases but not counted. When the cluster was read (or with `--interruption`),
