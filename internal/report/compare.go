@@ -44,7 +44,9 @@ func (c *Comparison) Regressions() int {
 	return n
 }
 
-// LoadBaseline reads a report written earlier with -f json.
+// LoadBaseline reads a report written earlier with -f json. It refuses a report with a schema newer
+// than this version understands, because comparing against a layout it cannot read would hide
+// regressions instead of reporting them.
 func LoadBaseline(path string) (Report, error) {
 	var r Report
 	data, err := os.ReadFile(path)
@@ -53,6 +55,13 @@ func LoadBaseline(path string) (Report, error) {
 	}
 	if err := json.Unmarshal(data, &r); err != nil {
 		return r, fmt.Errorf("%s is not a spot-readiness JSON report: %w", path, err)
+	}
+	switch {
+	case r.SchemaVersion == "":
+		r.SchemaVersion = "1" // written before the field existed, same layout as schema 1
+	case r.SchemaVersion != SchemaVersion:
+		return r, fmt.Errorf("%s has schema version %q (written by spot-readiness %s), but this version reads schema %q: upgrade spot-readiness or create the baseline again",
+			path, r.SchemaVersion, r.ToolVersion, SchemaVersion)
 	}
 	return r, nil
 }

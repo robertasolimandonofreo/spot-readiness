@@ -9,6 +9,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/robertasolimandonofreo/spot-readiness/internal/report"
 	"github.com/robertasolimandonofreo/spot-readiness/internal/rules"
 )
 
@@ -54,7 +55,10 @@ type Summary struct {
 
 // Plan is the migration plan.
 type Plan struct {
-	Summary Summary `json:"summary"`
+	// SchemaVersion and ToolVersion identify the layout and the release, like in the scan report.
+	SchemaVersion string  `json:"schemaVersion"`
+	ToolVersion   string  `json:"toolVersion"`
+	Summary       Summary `json:"summary"`
 	// Prerequisites are cluster-level things to do before the first move (phase 0).
 	Prerequisites []string `json:"prerequisites"`
 	Phase1        []Entry  `json:"phase1"`
@@ -89,7 +93,7 @@ func percent(part, total int64) int {
 //
 // prerequisites are added as phase 0.
 func Build(results []rules.Result, prerequisites []string) Plan {
-	p := Plan{Prerequisites: append([]string{}, prerequisites...), Phase1: []Entry{}, Phase2: []Entry{}, KeepOnDemand: []Entry{}}
+	p := Plan{SchemaVersion: report.SchemaVersion, Prerequisites: append([]string{}, prerequisites...), Phase1: []Entry{}, Phase2: []Entry{}, KeepOnDemand: []Entry{}}
 	s := &p.Summary
 	s.Workloads = len(results)
 	for _, r := range results {

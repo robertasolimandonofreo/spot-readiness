@@ -95,3 +95,36 @@ func TestLoadBaseline(t *testing.T) {
 		t.Fatal("invalid JSON must be an error")
 	}
 }
+
+func TestBaselineSchema(t *testing.T) {
+	dir := t.TempDir()
+	write := func(doc string) string {
+		path := filepath.Join(dir, "b.json")
+		if err := os.WriteFile(path, []byte(doc), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		return path
+	}
+	// A report written by this version carries both fields.
+	rep := Build([]rules.Result{res("api", 85, "SR005")}, 0)
+	rep.ToolVersion = "v1.2.3"
+	var buf bytes.Buffer
+	if err := JSON(&buf, rep); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(buf.String(), `"schemaVersion": "1"`) || !strings.Contains(buf.String(), `"toolVersion": "v1.2.3"`) {
+		t.Fatalf("json: %s", buf.String()[:120])
+	}
+	if b, err := LoadBaseline(write(buf.String())); err != nil || b.SchemaVersion != "1" {
+		t.Fatalf("current schema: %+v, %v", b, err)
+	}
+	// A report from before 0.8.0 has no schema field and has the layout of schema 1.
+	if b, err := LoadBaseline(write(`{"summary":{},"results":[]}`)); err != nil || b.SchemaVersion != "1" {
+		t.Fatalf("legacy report: %+v, %v", b, err)
+	}
+	// A newer schema is refused, with a message that says what to do.
+	_, err := LoadBaseline(write(`{"schemaVersion":"2","toolVersion":"v2.0.0","summary":{},"results":[]}`))
+	if err == nil || !strings.Contains(err.Error(), `schema version "2"`) || !strings.Contains(err.Error(), "upgrade spot-readiness") {
+		t.Fatalf("newer schema: %v", err)
+	}
+}

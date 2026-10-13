@@ -16,6 +16,12 @@ import (
 	"github.com/robertasolimandonofreo/spot-readiness/internal/rules"
 )
 
+// SchemaVersion is the layout of the JSON report. Adding a field does not change it. It goes up when a
+// field is renamed, removed or changes meaning, and --baseline then needs to read the old layout:
+// a report with a newer schema than the tool knows is refused, and one without the field (written
+// before 0.8.0) is read as schema 1, which has the same layout.
+const SchemaVersion = "1"
+
 const calculatorURL = "https://www.robertasoliman.com/en/tools/kubernetes-savings-calculator"
 
 type Summary struct {
@@ -41,8 +47,13 @@ type Summary struct {
 }
 
 type Report struct {
-	Summary Summary        `json:"summary"`
-	Results []rules.Result `json:"results"`
+	// SchemaVersion identifies the layout of this JSON, so a report written by one version can be
+	// read by another, for example as a --baseline. See SchemaVersion.
+	SchemaVersion string `json:"schemaVersion"`
+	// ToolVersion is the spot-readiness release that wrote the report.
+	ToolVersion string         `json:"toolVersion"`
+	Summary     Summary        `json:"summary"`
+	Results     []rules.Result `json:"results"`
 	// Karpenter is the NodePool analysis, present only when it was asked for (scan --karpenter).
 	Karpenter []karpenter.Result `json:"karpenter,omitempty"`
 	// Interruption is the cluster-level assessment, present in cluster mode or with --interruption.
@@ -80,7 +91,7 @@ func Build(results []rules.Result, skipped int) Report {
 		s.PotentialPercent = int((s.PotentialCPU*100 + s.CPUMilli/2) / s.CPUMilli)
 		s.CalculatorURL = fmt.Sprintf("%s?tolerant=%d", calculatorURL, s.PotentialPercent)
 	}
-	return Report{Summary: s, Results: results}
+	return Report{SchemaVersion: SchemaVersion, Summary: s, Results: results}
 }
 
 func JSON(w io.Writer, r Report) error {
