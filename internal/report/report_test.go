@@ -116,3 +116,20 @@ func TestTableInterruptionHandling(t *testing.T) {
 		}
 	}
 }
+
+func TestTableSuggest(t *testing.T) {
+	rep := Build([]rules.Result{{Kind: "Deployment", Namespace: "shop", Name: "api", Score: 85, Verdict: rules.Caveats,
+		Findings: []rules.Finding{{Rule: "SR004", Severity: rules.Caveat, Message: "no spread", File: "k8s/api.yaml", Line: 12,
+			Remediation: "Spread the replicas.\n\n# spec.template.spec\ntopologySpreadConstraints:\n  - maxSkew: 1", DocsURL: "https://example.com/doc"}}}}, 0)
+	var plain, suggest bytes.Buffer
+	TableWith(&plain, rep, TableOptions{Verbose: true})
+	TableWith(&suggest, rep, TableOptions{Suggest: true})
+	if strings.Contains(plain.String(), "Suggested remediation") {
+		t.Error("remediation must only show with --suggest")
+	}
+	for _, want := range []string{"SR004 [caveat] no spread (k8s/api.yaml:12)", "Suggested remediation:", "      topologySpreadConstraints:", "        - maxSkew: 1", "Docs: https://example.com/doc"} {
+		if !strings.Contains(suggest.String(), want) {
+			t.Errorf("missing %q\n%s", want, suggest.String())
+		}
+	}
+}

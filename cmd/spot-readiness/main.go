@@ -29,6 +29,7 @@ Usage:
 Flags for scan:
   -f, --format string     table (default), json, csv, markdown or sarif (-o/--output also work)
   -v, --verbose           explain every finding
+      --suggest           also print a suggested fix and a docs link for every finding
       --include-system    also analyze kube-system, kube-public and kube-node-lease
       --context string    kubeconfig context to read (cluster mode)
       --kubeconfig string kubeconfig file (cluster mode; default KUBECONFIG or ~/.kube/config)
@@ -63,12 +64,13 @@ func main() {
 func scan(args []string) int {
 	fs := flag.NewFlagSet("scan", flag.ContinueOnError)
 	var format, failOn, kubeContext, kubeconfig, namespace, configPath, baselinePath string
-	var verbose, includeSystem, withKarpenter, withInterruption, failOnRegression bool
+	var verbose, includeSystem, withKarpenter, withInterruption, failOnRegression, suggest bool
 	for _, name := range []string{"f", "format", "o", "output"} {
 		fs.StringVar(&format, name, "table", "output format: table, json, csv, markdown or sarif")
 	}
 	fs.BoolVar(&verbose, "v", false, "explain findings")
 	fs.BoolVar(&verbose, "verbose", false, "explain findings")
+	fs.BoolVar(&suggest, "suggest", false, "print suggested fixes")
 	fs.BoolVar(&includeSystem, "include-system", false, "include system namespaces")
 	fs.BoolVar(&withKarpenter, "karpenter", false, "check Karpenter NodePools")
 	fs.BoolVar(&withInterruption, "interruption", false, "assess interruption handling")
@@ -175,7 +177,7 @@ func scan(args []string) int {
 	case "sarif":
 		err = report.SARIF(os.Stdout, rep, version)
 	default:
-		report.Table(os.Stdout, rep, verbose)
+		report.TableWith(os.Stdout, rep, report.TableOptions{Verbose: verbose, Suggest: suggest})
 	}
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "error:", err)

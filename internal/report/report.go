@@ -205,7 +205,38 @@ func Markdown(w io.Writer, r Report) {
 	fmt.Fprintln(w, "\n_Ready does not mean safe: this tool only sees configuration, not how your application behaves._")
 }
 
+// TableOptions selects what the table adds to the one-line-per-workload view.
+type TableOptions struct {
+	// Verbose explains every finding, with its file and line when there is one.
+	Verbose bool
+	// Suggest also prints the suggested fix and the documentation link of every finding. It
+	// implies Verbose.
+	Suggest bool
+}
+
 func Table(w io.Writer, r Report, verbose bool) {
+	TableWith(w, r, TableOptions{Verbose: verbose})
+}
+
+// printFix prints a finding's suggested fix: the advice, then the snippet indented as a block.
+func printFix(w io.Writer, remediation, docs string) {
+	if remediation != "" {
+		fmt.Fprintln(w, "    Suggested remediation:")
+		for _, line := range strings.Split(remediation, "\n") {
+			if line == "" {
+				fmt.Fprintln(w)
+			} else {
+				fmt.Fprintf(w, "      %s\n", line)
+			}
+		}
+	}
+	if docs != "" {
+		fmt.Fprintf(w, "    Docs: %s\n", docs)
+	}
+}
+
+func TableWith(w io.Writer, r Report, opts TableOptions) {
+	verbose := opts.Verbose || opts.Suggest
 	tw := tabwriter.NewWriter(w, 0, 4, 2, ' ', 0)
 	fmt.Fprintln(tw, "VERDICT\tSCORE\tWORKLOAD\tREPLICAS\tCPU\tSPOT\tFINDINGS")
 	for _, res := range r.Results {
@@ -224,7 +255,7 @@ func Table(w io.Writer, r Report, verbose bool) {
 
 	flexibility(w, r.Results)
 	runtimeRisk(w, r.Results, verbose)
-	nodePools(w, r.Karpenter, verbose)
+	nodePools(w, r.Karpenter, verbose, opts.Suggest)
 	interruptionHandling(w, r.Interruption)
 	comparisonTable(w, r.Comparison)
 
@@ -241,6 +272,9 @@ func Table(w io.Writer, r Report, verbose bool) {
 					where = fmt.Sprintf(" (%s:%d)", f.File, f.Line)
 				}
 				fmt.Fprintf(w, "  %s [%s] %s%s\n", f.Rule, f.Severity, f.Message, where)
+				if opts.Suggest {
+					printFix(w, f.Remediation, f.DocsURL)
+				}
 			}
 			for _, ig := range res.Ignored {
 				reason := ig.Reason
@@ -366,7 +400,7 @@ func findingIDs(fs []karpenter.Finding, sep string) string {
 
 // nodePools prints the Karpenter analysis. Pools that cannot launch Spot nodes are listed without a
 // score. A nil list means the analysis was not asked for.
-func nodePools(w io.Writer, pools []karpenter.Result, verbose bool) {
+func nodePools(w io.Writer, pools []karpenter.Result, verbose, suggest bool) {
 	if pools == nil {
 		return
 	}
@@ -386,6 +420,9 @@ func nodePools(w io.Writer, pools []karpenter.Result, verbose bool) {
 		for _, np := range pools {
 			for _, f := range np.Findings {
 				fmt.Fprintf(w, "  %s [%s] %s: %s\n", f.Rule, f.Severity, np.NodePool, f.Message)
+				if suggest {
+					printFix(w, f.Remediation, f.DocsURL)
+				}
 			}
 		}
 	}

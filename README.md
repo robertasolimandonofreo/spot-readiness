@@ -254,6 +254,35 @@ weighing them like always-on services would overstate their share. The link in t
 [Kubernetes savings calculator](https://www.robertasoliman.com/en/tools/kubernetes-savings-calculator)
 with that number filled in as the interruption-tolerant share.
 
+## Suggested fixes (`--suggest`)
+
+Every finding carries a suggested fix and a link to the documentation. `scan --suggest` prints them
+under each finding (it implies `-v`), with the names of your workload filled in:
+
+```
+shop/deployment/api
+  SR004 [caveat] no topology spread or pod anti-affinity: ... (k8s/api.yaml:39)
+    Suggested remediation:
+      Spread the replicas across zones and nodes.
+
+      # spec.template.spec
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: topology.kubernetes.io/zone
+          whenUnsatisfiable: ScheduleAnyway
+          labelSelector:
+            matchLabels:
+              app: api
+        ...
+    Docs: https://kubernetes.io/docs/concepts/scheduling-eviction/topology-spread-constraints/
+```
+
+The first line is the advice, then a snippet to adapt, headed by where it goes (the `#` line).
+Values such as a health path, a grace period or a list of zones are starting points, not
+measurements: check them against your application. The tool never changes your files. The JSON
+findings have `remediation` and `docsUrl` (the Karpenter findings too), and the SARIF rules link
+to the documentation. Karpenter findings are shown with `--karpenter --suggest`.
+
 ## SARIF and Code Scanning (`-f sarif`)
 
 `scan -f sarif ./k8s` writes a SARIF 2.1.0 report that GitHub Code Scanning shows on the manifest

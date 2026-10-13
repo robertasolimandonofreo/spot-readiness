@@ -40,6 +40,7 @@ type sarifText struct {
 
 type sarifRule struct {
 	ID                   string          `json:"id"`
+	HelpURI              string          `json:"helpUri,omitempty"`
 	ShortDescription     sarifText       `json:"shortDescription"`
 	DefaultConfiguration sarifRuleConfig `json:"defaultConfiguration"`
 }
@@ -102,7 +103,7 @@ func SARIF(w io.Writer, r Report, version string) error {
 	index := map[string]int{}
 	for _, d := range rules.Descriptions {
 		index[d.ID] = len(driver.Rules)
-		driver.Rules = append(driver.Rules, sarifRule{ID: d.ID, ShortDescription: sarifText{d.Text},
+		driver.Rules = append(driver.Rules, sarifRule{ID: d.ID, HelpURI: rules.DocsURL(d.ID), ShortDescription: sarifText{d.Text},
 			DefaultConfiguration: sarifRuleConfig{Level: sarifLevel(rules.Severity(d.Severity))}})
 	}
 

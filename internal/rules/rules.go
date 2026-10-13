@@ -58,6 +58,10 @@ type Finding struct {
 	Line int    `json:"line,omitempty"`
 	// Path names that field for a Locator.
 	Path string `json:"-"`
+	// Remediation is the suggested fix: one line of advice, then a snippet to adapt. DocsURL is
+	// the documentation to read.
+	Remediation string `json:"remediation,omitempty"`
+	DocsURL     string `json:"docsUrl,omitempty"`
 }
 
 type Verdict string
@@ -351,6 +355,7 @@ func Evaluate(inv *Inventory, w Workload) Result {
 				res.Ignored = append(res.Ignored, Ignored{Rule: finding.Rule, Reason: ig.Reason})
 				continue
 			}
+			remediate(finding, inv, w)
 			finding.File = w.Source.File
 			if w.Source.Locator != nil {
 				finding.Line = w.Source.Locator.Line(finding.Path)

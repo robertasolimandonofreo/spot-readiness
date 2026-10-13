@@ -67,6 +67,9 @@ type Finding struct {
 	Rule     string `json:"rule"`
 	Severity string `json:"severity"`
 	Message  string `json:"message"`
+	// Remediation is the suggested fix: one line of advice, then a snippet to adapt.
+	Remediation string `json:"remediation,omitempty"`
+	DocsURL     string `json:"docsUrl,omitempty"`
 }
 
 // Result is the analysis of one NodePool. Zero Zones, InstanceFamilies or InstanceTypes mean the
@@ -261,7 +264,9 @@ func AnalyzeWith(inv *Inventory, opts Options) []Result {
 				}
 				sev = o
 			}
-			res.Findings = append(res.Findings, Finding{Rule: id, Severity: sev, Message: fmt.Sprintf(format, args...)})
+			fix := remediations[id]
+			res.Findings = append(res.Findings, Finding{Rule: id, Severity: sev, Message: fmt.Sprintf(format, args...),
+				Remediation: fix.text, DocsURL: fix.url})
 		}
 		switch {
 		case res.Zones == 1:
@@ -312,4 +317,20 @@ func AnalyzeWith(inv *Inventory, opts Options) []Result {
 		out = append(out, res)
 	}
 	return out
+}
+
+const (
+	nodePoolDocs   = "https://karpenter.sh/docs/concepts/nodepools/"
+	disruptionDocs = "https://karpenter.sh/docs/concepts/disruption/"
+)
+
+// remediations are the suggested fixes: one line of advice, then a snippet to adapt.
+var remediations = map[string]struct{ text, url string }{
+	"KR001": {"Let the NodePool use every zone that has a subnet, or list at least two.\n\n# NodePool spec.template.spec.requirements\n- key: topology.kubernetes.io/zone\n  operator: In\n  values: [\"<zone-a>\", \"<zone-b>\", \"<zone-c>\"]", nodePoolDocs},
+	"KR002": {"Allow several instance categories and make Karpenter keep a minimum of families.\n\n# NodePool spec.template.spec.requirements\n- key: karpenter.k8s.aws/instance-category\n  operator: In\n  values: [\"c\", \"m\", \"r\"]\n- key: karpenter.k8s.aws/instance-family\n  operator: Exists\n  minValues: 5", nodePoolDocs},
+	"KR003": {"List more instance types, or better, constrain by category and generation and let Karpenter pick the types.\n\n# NodePool spec.template.spec.requirements\n- key: karpenter.k8s.aws/instance-category\n  operator: In\n  values: [\"c\", \"m\", \"r\"]\n- key: karpenter.k8s.aws/instance-generation\n  operator: Gt\n  values: [\"2\"]\n- key: node.kubernetes.io/instance-type\n  operator: Exists\n  minValues: 10", nodePoolDocs},
+	"KR004": {"Drop the constraints the workloads do not need (a specific size, CPU or memory) and keep a wide category and generation range.", nodePoolDocs},
+	"KR005": {"Set a disruption budget that fits you. Remove a budget of 0 nodes that is always active, or limit it with a schedule.\n\n# NodePool spec.disruption\nbudgets:\n  - nodes: \"10%\"\n  - nodes: \"0\"          # block voluntary disruption only during business hours\n    schedule: \"0 9 * * mon-fri\"\n    duration: 8h", disruptionDocs},
+	"KR006": {"Allow on-demand as a fallback in this NodePool (Karpenter prefers Spot), or add an on-demand NodePool.\n\n# NodePool spec.template.spec.requirements\n- key: karpenter.sh/capacity-type\n  operator: In\n  values: [\"spot\", \"on-demand\"]", nodePoolDocs},
+	"KR007": {"Make Karpenter keep a minimum of instance diversity.\n\n# NodePool spec.template.spec.requirements\n- key: karpenter.k8s.aws/instance-family\n  operator: Exists\n  minValues: 5", nodePoolDocs},
 }

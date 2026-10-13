@@ -130,3 +130,17 @@ func TestOptions(t *testing.T) {
 		t.Fatal("off drops the rule")
 	}
 }
+
+func TestFindingsCarryRemediation(t *testing.T) {
+	r := find(t, Analyze(&Inventory{NodePools: []NodePool{pool("p", req(keyCapacity, "In", "spot"))}}), "p")
+	for _, f := range r.Findings {
+		if f.Remediation == "" || !strings.HasPrefix(f.DocsURL, "https://") {
+			t.Errorf("%s has no remediation or docs link", f.Rule)
+		}
+	}
+	for _, d := range Rules {
+		if remediations[d.ID].text == "" {
+			t.Errorf("%s has no remediation", d.ID)
+		}
+	}
+}
