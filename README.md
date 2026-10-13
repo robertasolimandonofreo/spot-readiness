@@ -287,8 +287,9 @@ SPOT MIGRATION PLAN
 
 Total workloads:             42
 Ready now:                   18
-Ready after changes:         15
-Keep on on-demand:           9
+Ready after changes:         12
+Manual review:               5
+Keep on on-demand:           7
 
 Requested CPU:               84 vCPU
 Immediately movable to Spot: 37 vCPU (44%)
@@ -297,25 +298,33 @@ Potential after changes:     66 vCPU (79%)
 Phase 1: move now (safest first)
   shop/deployment/api  (4 vCPU)
   ...
-Phase 2: move after these changes (fewest changes first)
-  shop/deployment/checkout  (8 vCPU)
-    SR004  Spread the replicas across zones and nodes.
-    SR006  Add a readinessProbe so traffic only reaches pods that can serve it.
+Phase 2: move after these changes (best return for the effort first)
+  1. shop/deployment/checkout  (8 vCPU, 2 changes, score 70, confidence high)
+       SR004  Spread the replicas across zones and nodes.
+       SR006  Add a readinessProbe so traffic only reaches pods that can serve it.
+Manual review
+  shop/statefulset/postgres  (6 vCPU, confidence low)
+    Persistent state detected: uses persistent volumes: ...
 Keep on on-demand
-  shop/statefulset/postgres  (6 vCPU)
-    uses persistent volumes: zonal disks make rescheduling slower and tied to one zone
+  shop/deployment/agent  (1 vCPU)
+    hostPath volume "scratch": its data is lost with the node
 ```
 
-Workloads fall in three groups:
+Workloads fall in four groups:
 
 - **Ready now** (phase 1): no blocker and no caveat. Info findings are advice, not a condition.
-  Listed safest first (highest score, then the most CPU).
-- **Ready after changes** (phase 2): blockers or caveats, but none that configuration cannot fix.
-  Each change is the first line of the finding's suggested fix. Listed with the fewest changes first.
-- **Keep on on-demand**: data that lives on the node (SR002, `hostPath`), a StatefulSet with
-  persistent volumes (SR007), or any workload with persistent volumes that runs a single replica
-  (a database run as a Deployment, for example: a volume usually attaches to one pod, so adding
-  replicas is not a configuration fix). Moving those is a design decision.
+  Listed safest first (highest score, then the most CPU), a good order for a pilot.
+- **Ready after changes** (phase 2): blockers or caveats that configuration fixes. Each change is the
+  first line of the finding's suggested fix. They are ranked by priority: the vCPU that would move,
+  times the score, times the confidence (`high` 1, `medium` 0.7, `low` 0.4), divided by the number of
+  changes. It is a way to order the work, not a forecast of savings.
+- **Manual review**: persistent state (SR007) on a StatefulSet, or on a workload that runs a
+  single replica, such as a database run as a Deployment. Whether it can use Spot depends on the
+  application: Kafka with a replication factor of 3, or a PostgreSQL cluster spread over zones, can.
+  The manifest does not show that, so the plan lists what to look at (storage topology,
+  replication and quorum, recovery time, zone dependency) instead of deciding. Their CPU is shown
+  apart and is not in the potential.
+- **Keep on on-demand**: data that lives on the node (SR002, `hostPath`), which no setting fixes.
 
 The CPU figures cover long-running workloads, like the Spot potential of `scan`: Jobs and CronJobs
 are listed in the phases but not counted. When the cluster was read (or with `--interruption`),
