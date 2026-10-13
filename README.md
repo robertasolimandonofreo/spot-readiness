@@ -85,21 +85,10 @@ cpu_request_millis, already_on_spot, findings` (rule IDs joined with `;`) and no
 
 `-f markdown` prints a report for a pull request comment: a summary, a table of the workloads that
 need attention (worst first, at most 50 rows) and the rule reference in a collapsed block. The first
-line is the marker `<!-- spot-readiness -->`, so a CI step can update its own comment.
+line is the marker `<!-- spot-readiness -->`, so a CI step can update its own comment. The
+[GitHub Action](#github-action) below posts and updates that comment for you.
 
-```yaml
-# Example GitHub Actions job (adapt it to your repository)
-- run: |
-    docker run --rm -v "$PWD:/work:ro" ghcr.io/robertasolimandonofreo/spot-readiness:latest \
-      scan -f markdown /work/k8s > report.md
-    gh pr comment ${{ github.event.pull_request.number }} --body-file report.md --edit-last --create-if-none
-  env:
-    GH_TOKEN: ${{ github.token }}
-```
-
-On pull requests from forks, GitHub gives `GITHUB_TOKEN` read-only access, so the comment step
-fails there. Use it for branches in the same repository, or post the report from a separate
-`workflow_run` job.
+### Exit codes and skipped objects
 
 `--fail-on` accepts `not-ready` or `caveats`. DaemonSets and ReplicaSets are counted as skipped, and
 so are workloads scaled to zero (without an HPA or KEDA minimum), suspended CronJobs, finished Jobs
@@ -107,6 +96,45 @@ so are workloads scaled to zero (without an HPA or KEDA minimum), suspended Cron
 (workloads that only run `pause` containers, for example to make Karpenter create nodes ahead of
 time), Rollouts that use `workloadRef` and objects with no name, such as unrendered Helm templates.
 `kube-system`, `kube-public` and `kube-node-lease` are skipped unless you pass `--include-system`.
+
+## GitHub Action
+
+The repository is also a GitHub Action. It installs the release that matches the action's version
+(checking its checksum), scans your manifests, adds the report to the job summary and, optionally,
+comments on the pull request and fails the job.
+
+```yaml
+name: spot-readiness
+on: pull_request
+permissions:
+  contents: read
+  pull-requests: write   # only needed when comment is true
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - id: spot
+        uses: robertasolimandonofreo/spot-readiness@v0.6.0
+        with:
+          path: ./k8s            # files or directories, separated by spaces
+          comment: "true"        # one comment, updated on every push
+          fail-on: not-ready     # or caveats; empty never fails
+      - run: echo "Spot potential ${{ steps.spot.outputs.potential-percent }}%"
+```
+
+| Input | Default | |
+|---|---|---|
+| `path` | `.` | Files or directories to scan, separated by spaces |
+| `comment` | `false` | Comment on the pull request and keep that comment updated |
+| `fail-on` | empty | `not-ready` or `caveats` fails the job; the comment is still posted |
+| `include-system` | `false` | Also analyze `kube-system` and the other system namespaces |
+| `version` | the action's version | A release such as `v0.6.0`; with a branch ref it uses the latest release |
+| `github-token` | `github.token` | Token used to comment |
+
+Outputs: `potential-percent`, `ready`, `caveats` and `not-ready`. It runs on Linux and macOS runners.
+The action reads manifests only; for a live cluster use the binary or the image. On pull requests
+from forks `GITHUB_TOKEN` is read-only, so `comment` fails there.
 
 ## Rules
 
@@ -162,8 +190,8 @@ with that number filled in as the interruption-tolerant share.
 
 ## Roadmap
 
-- GitHub Action and `kubectl` plugin (krew).
-- If asked: Argo Rollouts that use `workloadRef` (today the referenced Deployment is analyzed).
+Nothing is planned. If asked: Argo Rollouts that use `workloadRef` (today the referenced
+Deployment is analyzed).
 
 Checking whether a Job checkpoints its progress is not on the roadmap: it is behavior of the
 application, and manifests do not show it.
