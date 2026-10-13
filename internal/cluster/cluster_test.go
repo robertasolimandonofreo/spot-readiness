@@ -42,6 +42,10 @@ func TestLoad(t *testing.T) {
 		t.Fatalf("all namespaces: got %d workloads and %d skipped, want 4 and 1", len(all.Workloads), all.Skipped)
 	}
 
+	if len(all.DaemonSets) != 1 || all.DaemonSets[0].Name != "agent" {
+		t.Fatalf("daemonsets: %+v", all.DaemonSets)
+	}
+
 	shop, err := Load(context.Background(), Clients{Kube: client}, "shop")
 	if err != nil {
 		t.Fatal(err)

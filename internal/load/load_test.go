@@ -49,6 +49,9 @@ items:
 	if err := Add(inv, []byte(doc)); err != nil {
 		t.Fatal(err)
 	}
+	if len(inv.DaemonSets) != 1 || inv.DaemonSets[0].Name != "d" {
+		t.Fatalf("daemonsets: %+v", inv.DaemonSets)
+	}
 	if len(inv.Workloads) != 1 || inv.Skipped != 1 || inv.Workloads[0].Namespace != "default" {
 		t.Fatalf("got %d workloads, %d skipped, ns %q", len(inv.Workloads), inv.Skipped, inv.Workloads[0].Namespace)
 	}

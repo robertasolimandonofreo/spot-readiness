@@ -132,6 +132,9 @@ func Load(ctx context.Context, c Clients, namespace string) (*rules.Inventory, e
 	// The lists below are optional: a missing permission or CRD must not fail the scan.
 	if l, err := client.AppsV1().DaemonSets(ns).List(ctx, opts); err == nil {
 		inv.Skipped += len(l.Items)
+		for _, d := range l.Items {
+			inv.DaemonSets = append(inv.DaemonSets, rules.FromDaemonSet(d))
+		}
 	}
 	if l, err := client.BatchV1().Jobs(ns).List(ctx, opts); err == nil {
 		for _, j := range l.Items {

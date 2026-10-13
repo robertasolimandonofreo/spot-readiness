@@ -260,7 +260,14 @@ func addJSON(inv *rules.Inventory, doc []byte) error {
 			c.Zones = append(c.Zones, sn.Zone)
 		}
 		inv.Karpenter.NodeClasses = append(inv.Karpenter.NodeClasses, c)
-	case "DaemonSet", "ReplicaSet":
+	case "DaemonSet":
+		var o appsv1.DaemonSet
+		if err := decode(&o); err != nil {
+			return err
+		}
+		inv.DaemonSets = append(inv.DaemonSets, rules.FromDaemonSet(o))
+		inv.Skipped++
+	case "ReplicaSet":
 		inv.Skipped++
 	}
 	return nil

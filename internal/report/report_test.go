@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/robertasolimandonofreo/spot-readiness/internal/interruption"
 	"github.com/robertasolimandonofreo/spot-readiness/internal/rules"
 )
 
@@ -95,6 +96,21 @@ func TestTableRuntimeRisk(t *testing.T) {
 	Table(&buf, rep, true)
 	for _, want := range []string{"RUNTIME RISK", "shop/deployment/api", "ip-1  us-east-1a  spot", "⚠ All 4 pods",
 		"Runtime resilience: LOW", "Manifest readiness: 85"} {
+		if !strings.Contains(buf.String(), want) {
+			t.Errorf("missing %q\n%s", want, buf.String())
+		}
+	}
+}
+
+func TestTableInterruptionHandling(t *testing.T) {
+	score := 86
+	rep := Build(nil, 0)
+	rep.Interruption = &interruption.Assessment{KarpenterDetected: true, InterruptionQueue: interruption.Yes,
+		SpotDetected: true, SpotNodes: 3, PDBIssues: 2, SlowTermination: 1, Score: &score, Notes: []string{}}
+	var buf bytes.Buffer
+	Table(&buf, rep, false)
+	for _, want := range []string{"INTERRUPTION HANDLING", "Karpenter detected", "✓", "Spot nodes detected", "✓ (3 nodes)",
+		"Node Termination Handler", "PDB issues", "Workloads >120s termination", "Cluster interruption readiness: 86/100"} {
 		if !strings.Contains(buf.String(), want) {
 			t.Errorf("missing %q\n%s", want, buf.String())
 		}

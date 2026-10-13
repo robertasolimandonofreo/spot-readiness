@@ -12,6 +12,9 @@ type Node struct {
 	Zone         string
 	CapacityType string // "spot", "on-demand" or "" when the node does not say
 	InstanceType string
+	// Provisioner is "karpenter" or "eks-managed" for nodes launched by Karpenter or by an EKS
+	// managed node group, and empty for any other node (for example a self-managed Auto Scaling group).
+	Provisioner string
 }
 
 // NodeFromLabels reads the zone, capacity type and instance type from the usual node labels
@@ -23,6 +26,12 @@ func NodeFromLabels(name string, l map[string]string) Node {
 	}
 	if n.InstanceType == "" {
 		n.InstanceType = l["beta.kubernetes.io/instance-type"]
+	}
+	switch {
+	case l["karpenter.sh/capacity-type"] != "" || l["karpenter.sh/nodepool"] != "":
+		n.Provisioner = "karpenter"
+	case l["eks.amazonaws.com/capacityType"] != "":
+		n.Provisioner = "eks-managed"
 	}
 	switch {
 	case l["karpenter.sh/capacity-type"] == "spot", l["eks.amazonaws.com/capacityType"] == "SPOT":
@@ -41,6 +50,20 @@ func (inv *Inventory) SetNodes(nodes []Node) {
 	for _, n := range nodes {
 		inv.nodes[n.Name] = n
 	}
+}
+
+// HasNodes reports whether the cluster's nodes were read.
+func (inv *Inventory) HasNodes() bool { return inv.nodes != nil }
+
+// SpotNodes counts the Spot nodes by what launched them (see Node.Provisioner).
+func (inv *Inventory) SpotNodes() map[string]int {
+	out := map[string]int{}
+	for _, n := range inv.nodes {
+		if n.CapacityType == "spot" {
+			out[n.Provisioner]++
+		}
+	}
+	return out
 }
 
 // AddPod records that a pod of the given workload runs on a node.

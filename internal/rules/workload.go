@@ -44,9 +44,11 @@ type Scaler struct {
 // Inventory is everything loaded from the manifests or the cluster.
 type Inventory struct {
 	Workloads []Workload
-	PDBs      []policyv1.PodDisruptionBudget
-	HPAs      []autoscalingv2.HorizontalPodAutoscaler
-	Scalers   []Scaler
+	// DaemonSets are not analyzed (they are counted in Skipped) but are kept for detection.
+	DaemonSets []Workload
+	PDBs       []policyv1.PodDisruptionBudget
+	HPAs       []autoscalingv2.HorizontalPodAutoscaler
+	Scalers    []Scaler
 	// Skipped counts objects that were recognised but are out of scope (for example DaemonSets).
 	Skipped int
 
@@ -81,6 +83,13 @@ func FromStatefulSet(s appsv1.StatefulSet) Workload {
 	return Workload{Kind: "StatefulSet", Namespace: namespaceOrDefault(s.Namespace), Name: s.Name,
 		Replicas: replicasOrOne(s.Spec.Replicas), Template: s.Spec.Template,
 		ClaimTemplates: len(s.Spec.VolumeClaimTemplates) > 0}
+}
+
+// FromDaemonSet is not analyzed as a workload: it is kept so the cluster's own components (such as
+// the Node Termination Handler) can be recognised.
+func FromDaemonSet(d appsv1.DaemonSet) Workload {
+	return Workload{Kind: "DaemonSet", Namespace: namespaceOrDefault(d.Namespace), Name: d.Name,
+		Replicas: 1, Template: d.Spec.Template}
 }
 
 func jobWorkload(kind, ns, name string, spec batchv1.JobSpec) Workload {

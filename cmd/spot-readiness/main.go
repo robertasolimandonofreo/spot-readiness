@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/robertasolimandonofreo/spot-readiness/internal/cluster"
+	"github.com/robertasolimandonofreo/spot-readiness/internal/interruption"
 	"github.com/robertasolimandonofreo/spot-readiness/internal/karpenter"
 	"github.com/robertasolimandonofreo/spot-readiness/internal/load"
 	"github.com/robertasolimandonofreo/spot-readiness/internal/report"
@@ -32,6 +33,7 @@ Flags for scan:
       --kubeconfig string kubeconfig file (cluster mode; default KUBECONFIG or ~/.kube/config)
   -n, --namespace string  only this namespace (cluster mode; default all)
       --karpenter         also check Karpenter NodePools (KR rules; cluster mode reads them, file mode reads them from the paths)
+      --interruption      assess how ready the cluster is for Spot interruptions (on in cluster mode)
       --fail-on string    exit 1 when a workload is "not-ready" or "caveats" (default: never)
 `
 
@@ -57,7 +59,7 @@ func main() {
 func scan(args []string) int {
 	fs := flag.NewFlagSet("scan", flag.ContinueOnError)
 	var format, failOn, kubeContext, kubeconfig, namespace string
-	var verbose, includeSystem, withKarpenter bool
+	var verbose, includeSystem, withKarpenter, withInterruption bool
 	for _, name := range []string{"f", "format", "o", "output"} {
 		fs.StringVar(&format, name, "table", "output format: table, json, csv or markdown")
 	}
@@ -65,6 +67,7 @@ func scan(args []string) int {
 	fs.BoolVar(&verbose, "verbose", false, "explain findings")
 	fs.BoolVar(&includeSystem, "include-system", false, "include system namespaces")
 	fs.BoolVar(&withKarpenter, "karpenter", false, "check Karpenter NodePools")
+	fs.BoolVar(&withInterruption, "interruption", false, "assess interruption handling")
 	fs.StringVar(&failOn, "fail-on", "", "not-ready or caveats")
 	fs.StringVar(&kubeContext, "context", "", "kubeconfig context")
 	fs.StringVar(&kubeconfig, "kubeconfig", "", "kubeconfig file")
@@ -101,7 +104,19 @@ func scan(args []string) int {
 		fmt.Fprintln(os.Stderr, "error:", err)
 		return 2
 	}
-	rep := report.Build(rules.Analyze(inv, includeSystem), inv.Skipped)
+	results := rules.Analyze(inv, includeSystem)
+	rep := report.Build(results, inv.Skipped)
+	// The assessment looks for Karpenter and the Node Termination Handler, which only a whole
+	// cluster shows. It is on in cluster mode (unless one namespace was selected) and, for files,
+	// only on request, because a repository rarely holds those components.
+	if (clusterMode && namespace == "") || withInterruption {
+		if namespace != "" {
+			fmt.Fprintln(os.Stderr, "note: interruption handling needs every namespace, skipped")
+		} else {
+			a := interruption.Assess(inv, results)
+			rep.Interruption = &a
+		}
+	}
 	if withKarpenter {
 		rep.Karpenter = karpenter.Analyze(&inv.Karpenter)
 		if rep.Karpenter == nil {

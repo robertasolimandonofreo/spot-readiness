@@ -146,6 +146,9 @@ func capacityTypes(reqs []Requirement) map[string]bool {
 	return map[string]bool{"on-demand": true} // Karpenter launches on-demand nodes unless told otherwise
 }
 
+// AllowsSpot reports whether the pool may launch Spot nodes.
+func AllowsSpot(p NodePool) bool { return capacityTypes(p.Spec.Template.Spec.Requirements)["spot"] }
+
 func joinSorted(set map[string]bool) string {
 	out := make([]string, 0, len(set))
 	for k := range set {

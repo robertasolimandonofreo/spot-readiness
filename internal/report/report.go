@@ -11,6 +11,7 @@ import (
 	"strings"
 	"text/tabwriter"
 
+	"github.com/robertasolimandonofreo/spot-readiness/internal/interruption"
 	"github.com/robertasolimandonofreo/spot-readiness/internal/karpenter"
 	"github.com/robertasolimandonofreo/spot-readiness/internal/rules"
 )
@@ -40,6 +41,8 @@ type Report struct {
 	Results []rules.Result `json:"results"`
 	// Karpenter is the NodePool analysis, present only when it was asked for (scan --karpenter).
 	Karpenter []karpenter.Result `json:"karpenter,omitempty"`
+	// Interruption is the cluster-level assessment, present in cluster mode or with --interruption.
+	Interruption *interruption.Assessment `json:"interruption,omitempty"`
 }
 
 func Build(results []rules.Result, skipped int) Report {
@@ -159,6 +162,15 @@ func Markdown(w io.Writer, r Report) {
 		}
 	}
 
+	if a := r.Interruption; a != nil {
+		fmt.Fprint(w, "\n### Interruption handling\n\n")
+		for _, row := range interruptionRows(a) {
+			fmt.Fprintf(w, "- %s: **%s**\n", row[0], row[1])
+		}
+		for _, n := range a.Notes {
+			fmt.Fprintf(w, "- %s\n", n)
+		}
+	}
 	if len(r.Karpenter) > 0 {
 		fmt.Fprint(w, "\n### Karpenter NodePools\n\n| NodePool | Capacity | AZs | Families | Types | Score | Findings |\n|---|---|---|---|---|---|---|\n")
 		for _, np := range r.Karpenter {
@@ -201,6 +213,7 @@ func Table(w io.Writer, r Report, verbose bool) {
 	flexibility(w, r.Results)
 	runtimeRisk(w, r.Results, verbose)
 	nodePools(w, r.Karpenter, verbose)
+	interruptionHandling(w, r.Interruption)
 
 	if verbose {
 		fmt.Fprintln(w)
@@ -350,4 +363,48 @@ func nodePools(w io.Writer, pools []karpenter.Result, verbose bool) {
 		}
 	}
 	fmt.Fprintln(w, "\nTYPES and FAMILIES count what the NodePool lists; \"any\" means it does not limit them (or the limit cannot be seen).")
+}
+
+func tick(ok bool) string {
+	if ok {
+		return "✓"
+	}
+	return "-"
+}
+
+func interruptionRows(a *interruption.Assessment) [][2]string {
+	queue := map[string]string{interruption.Yes: "✓", interruption.No: "-", interruption.Unknown: "? (controller not seen)", interruption.NA: "n/a"}[a.InterruptionQueue]
+	spot := tick(a.SpotDetected)
+	if a.SpotNodes > 0 {
+		spot = fmt.Sprintf("✓ (%d nodes)", a.SpotNodes)
+	}
+	return [][2]string{
+		{"Karpenter detected", tick(a.KarpenterDetected)},
+		{"Interruption queue configured", queue},
+		{"Spot nodes detected", spot},
+		{"Node Termination Handler", tick(a.NodeTerminationHandler)},
+		{"PDB issues", strconv.Itoa(a.PDBIssues)},
+		{"Workloads >120s termination", strconv.Itoa(a.SlowTermination)},
+	}
+}
+
+// interruptionHandling prints whether the cluster is ready to act on a Spot interruption notice.
+func interruptionHandling(w io.Writer, a *interruption.Assessment) {
+	if a == nil {
+		return
+	}
+	fmt.Fprint(w, "\nINTERRUPTION HANDLING\n\n")
+	tw := tabwriter.NewWriter(w, 0, 4, 2, ' ', 0)
+	for _, row := range interruptionRows(a) {
+		fmt.Fprintf(tw, "%s\t%s\n", row[0], row[1])
+	}
+	tw.Flush()
+	for _, n := range a.Notes {
+		fmt.Fprintf(w, "  note: %s\n", n)
+	}
+	if a.Score == nil {
+		fmt.Fprintln(w, "\nCluster interruption readiness: - (no Spot capacity found)")
+		return
+	}
+	fmt.Fprintf(w, "\nCluster interruption readiness: %d/100\n", *a.Score)
 }

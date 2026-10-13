@@ -168,6 +168,26 @@ SR001, SR004, SR005, SR006, SR009, SR014 and SR015 apply to long-running workloa
 Argo Rollouts and bare Pods). SR010 to SR013 apply to Jobs, CronJobs and KEDA ScaledJobs. SR002, SR003, SR007, SR008 and
 SR016 to SR019 apply to all of them.
 
+### Interruption handling (cluster mode)
+
+Workloads that are ready for Spot still lose their node if nothing reacts to the 2-minute notice.
+In cluster mode (all namespaces) the report ends with an `INTERRUPTION HANDLING` section, and
+`--interruption` turns it on for manifests too. It shows whether Karpenter is running, whether its
+controller has an interruption queue (the `INTERRUPTION_QUEUE` variable or `--interruption-queue`
+flag), whether Spot nodes exist, whether an AWS Node Termination Handler runs, how many workloads
+have PodDisruptionBudget problems (SR005, SR014) and how many need more than 120s to terminate
+(SR003). Spot nodes are counted by what launched them, from node labels: Karpenter nodes need the
+queue or the handler, nodes outside Karpenter and EKS managed node groups need the handler, and EKS
+managed node groups drain Spot nodes themselves (capacity rebalancing).
+
+The cluster interruption readiness score starts at 100 and loses 40 when nothing handles the notice,
+5 when the Karpenter queue and the handler both run (Karpenter's documentation recommends one), 5 per
+workload with a PodDisruptionBudget problem (up to 25) and 4 per workload with a slow termination (up
+to 16). Without Spot capacity there is no score. It is in the JSON `interruption` object and does not
+change `--fail-on`. It is skipped with `--namespace`, because Karpenter and the handler live in other
+namespaces. It cannot see an interruption queue configured in the older `karpenter-global-settings`
+ConfigMap, or how an Auto Scaling group is set up in AWS.
+
 ### Karpenter NodePools (`--karpenter`)
 
 `scan --karpenter` also checks Karpenter NodePools: in cluster mode it reads `nodepools`,
