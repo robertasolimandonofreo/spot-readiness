@@ -13,6 +13,8 @@ import (
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	dynamicfake "k8s.io/client-go/dynamic/fake"
 	"k8s.io/client-go/kubernetes/fake"
+
+	"github.com/robertasolimandonofreo/spot-readiness/internal/rules"
 )
 
 func i32(v int32) *int32 { return &v }
@@ -113,5 +115,40 @@ func TestLoadJobsAndCustomResources(t *testing.T) {
 	inv, err = Load(context.Background(), Clients{Kube: client}, "")
 	if err != nil || len(inv.Scalers) != 0 {
 		t.Fatalf("no dynamic client: %v, %d scalers", err, len(inv.Scalers))
+	}
+}
+
+func TestLoadPlacesPodsOnNodes(t *testing.T) {
+	yes := true
+	podSpec := corev1.PodSpec{Containers: []corev1.Container{{Name: "a", Image: "x"}}}
+	pod := func(name string, owner metav1.OwnerReference, node string, phase corev1.PodPhase) *corev1.Pod {
+		p := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: "shop"}, Spec: podSpec, Status: corev1.PodStatus{Phase: phase}}
+		p.Spec.NodeName = node
+		if owner.Kind != "" {
+			owner.Controller = &yes
+			p.OwnerReferences = []metav1.OwnerReference{owner}
+		}
+		return p
+	}
+	rs := metav1.OwnerReference{Kind: "ReplicaSet", Name: "web-abc"}
+	client := fake.NewSimpleClientset(
+		&appsv1.Deployment{ObjectMeta: metav1.ObjectMeta{Name: "web", Namespace: "shop"},
+			Spec: appsv1.DeploymentSpec{Replicas: i32(3), Template: corev1.PodTemplateSpec{Spec: podSpec}}},
+		&appsv1.ReplicaSet{ObjectMeta: metav1.ObjectMeta{Name: "web-abc", Namespace: "shop",
+			OwnerReferences: []metav1.OwnerReference{{Kind: "Deployment", Name: "web"}}}},
+		&corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: "n1", Labels: map[string]string{
+			"topology.kubernetes.io/zone": "a", "karpenter.sh/capacity-type": "spot"}}},
+		pod("web-1", rs, "n1", corev1.PodRunning),
+		pod("web-2", rs, "n1", corev1.PodRunning),
+		pod("web-3", rs, "n1", corev1.PodSucceeded),
+		pod("web-4", rs, "", corev1.PodPending),
+	)
+	inv, err := Load(context.Background(), Clients{Kube: client}, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	res := rules.Analyze(inv, false)
+	if len(res) != 1 || res[0].Runtime == nil || res[0].Runtime.Pods != 2 || res[0].Runtime.Resilience != "low" {
+		t.Fatalf("runtime: %+v", res)
 	}
 }

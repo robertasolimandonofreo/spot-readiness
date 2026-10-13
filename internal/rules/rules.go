@@ -78,6 +78,9 @@ type Result struct {
 	// Flexibility is how many capacity pools the workload can use. It is reported on its own and
 	// is not part of the score; the SR016 to SR019 findings are.
 	Flexibility Flexibility `json:"flexibility"`
+	// Runtime is where the pods run now. It is only set when a cluster was read, and it does not
+	// change the score: the manifest rules and the runtime placement answer different questions.
+	Runtime *Runtime `json:"runtime,omitempty"`
 }
 
 type scope int
@@ -299,7 +302,7 @@ func Evaluate(inv *Inventory, w Workload) Result {
 	}
 	res := Result{Kind: w.Kind, Namespace: w.Namespace, Name: w.Name, Replicas: replicas, Batch: w.Batch,
 		CPUMilli: cpuMilli(w, replicas), OnSpot: onSpot(w), Score: 100, Verdict: Ready, Findings: []Finding{},
-		Flexibility: flexibilityOf(w)}
+		Flexibility: flexibilityOf(w), Runtime: inv.runtimeOf(w)}
 	for _, r := range all {
 		if (r.scope == scopeBatch && !w.Batch) || (r.scope == scopeService && w.Batch) {
 			continue

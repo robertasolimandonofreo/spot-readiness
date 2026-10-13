@@ -60,7 +60,7 @@ spot-readiness scan --kubeconfig ./kc.yaml -f csv
 
 The minimum RBAC is `list` on `deployments`, `statefulsets`, `daemonsets` (apps), `pods` (core),
 `jobs` and `cronjobs` (batch), `poddisruptionbudgets` (policy) and `horizontalpodautoscalers`
-(autoscaling). Argo Rollouts (`rollouts`) and KEDA (`scaledobjects`, `scaledjobs`) are read too when
+(autoscaling). `nodes` (core) and `replicasets` (apps) are optional and enable the runtime risk view. Argo Rollouts (`rollouts`) and KEDA (`scaledobjects`, `scaledjobs`) are read too when
 those CRDs exist. Everything except Deployments, StatefulSets and Pods is optional: a missing permission or
 CRD only means that part is not analyzed. The tool never creates, changes or deletes anything and sends nothing outside your machine.
 
@@ -167,6 +167,21 @@ least 50 points.
 SR001, SR004, SR005, SR006, SR009, SR014 and SR015 apply to long-running workloads (Deployments, StatefulSets,
 Argo Rollouts and bare Pods). SR010 to SR013 apply to Jobs, CronJobs and KEDA ScaledJobs. SR002, SR003, SR007, SR008 and
 SR016 to SR019 apply to all of them.
+
+### Runtime risk (cluster mode)
+
+The rules above read configuration. When the tool reads a cluster it also checks where the running
+pods are: it follows each pod to its node and reads the node's zone, capacity type
+(Karpenter or EKS managed node group labels) and instance type. The `RUNTIME RISK` section lists
+Deployments, StatefulSets, Argo Rollouts and bare Pods whose pods are not well spread, with the blast
+radius of one node (the share of pods on the busiest node), a warning for each problem and the
+runtime resilience (`low`, `medium` or `high`) next to the manifest score. `-v` adds the table of
+nodes. It warns when all pods share one node or one Availability Zone, when half or more are on one
+node, and when all Spot pods sit in one instance type pool. The JSON `runtime` object and the CSV
+`runtime_resilience` column carry the same data.
+
+The runtime view is a snapshot and does not change the score or the verdict. It is skipped without
+permission to list `nodes`, and Jobs are not covered. Capacity types are read from AWS labels only.
 
 ### Spot flexibility
 

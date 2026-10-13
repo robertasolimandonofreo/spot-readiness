@@ -48,6 +48,10 @@ type Inventory struct {
 	Scalers   []Scaler
 	// Skipped counts objects that were recognised but are out of scope (for example DaemonSets).
 	Skipped int
+
+	// nodes and pods hold the runtime placement read from a cluster: see SetNodes and AddPod.
+	nodes map[string]Node
+	pods  map[string][]string
 }
 
 func namespaceOrDefault(ns string) string {

@@ -6,6 +6,7 @@ import (
 	"fmt"
 
 	batchv1 "k8s.io/api/batch/v1"
+	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
@@ -113,6 +114,8 @@ func Load(ctx context.Context, c Clients, namespace string) (*rules.Inventory, e
 		}
 	}
 
+	placePods(ctx, client, ns, inv, pods.Items)
+
 	pdbs, err := client.PolicyV1().PodDisruptionBudgets(ns).List(ctx, opts)
 	if err != nil {
 		return nil, fmt.Errorf("list poddisruptionbudgets: %w", err)
@@ -190,4 +193,59 @@ func Load(ctx context.Context, c Clients, namespace string) (*rules.Inventory, e
 		}
 	}
 	return inv, nil
+}
+
+// placePods records which node each running pod of a Deployment, StatefulSet, Argo Rollout or bare
+// Pod is on, so the report can show where the replicas actually are. It needs to list nodes and
+// ReplicaSets; without those permissions the runtime analysis is skipped, not the scan.
+func placePods(ctx context.Context, client kubernetes.Interface, ns string, inv *rules.Inventory, pods []corev1.Pod) {
+	nodeList, err := client.CoreV1().Nodes().List(ctx, metav1.ListOptions{})
+	if err != nil {
+		return
+	}
+	nodes := make([]rules.Node, 0, len(nodeList.Items))
+	for _, n := range nodeList.Items {
+		nodes = append(nodes, rules.NodeFromLabels(n.Name, n.Labels))
+	}
+	// A ReplicaSet belongs to a Deployment or an Argo Rollout, and its pods to that workload.
+	type owner struct{ kind, name string }
+	rsOwner := map[string]owner{}
+	if l, err := client.AppsV1().ReplicaSets(ns).List(ctx, metav1.ListOptions{}); err == nil {
+		for _, rs := range l.Items {
+			for _, o := range rs.OwnerReferences {
+				if o.Kind == "Deployment" || o.Kind == "Rollout" {
+					rsOwner[rs.Namespace+"/"+rs.Name] = owner{o.Kind, o.Name}
+				}
+			}
+		}
+	}
+	inv.SetNodes(nodes)
+	for _, p := range pods {
+		if p.Spec.NodeName == "" || p.DeletionTimestamp != nil ||
+			(p.Status.Phase != corev1.PodRunning && p.Status.Phase != corev1.PodPending) {
+			continue
+		}
+		kind, name := "Pod", p.Name
+		if len(p.OwnerReferences) > 0 {
+			o := p.OwnerReferences[0]
+			for _, c := range p.OwnerReferences {
+				if c.Controller != nil && *c.Controller {
+					o = c
+				}
+			}
+			switch o.Kind {
+			case "StatefulSet":
+				kind, name = o.Kind, o.Name
+			case "ReplicaSet":
+				ow, ok := rsOwner[p.Namespace+"/"+o.Name]
+				if !ok {
+					continue
+				}
+				kind, name = ow.kind, ow.name
+			default:
+				continue
+			}
+		}
+		inv.AddPod(p.Namespace, kind, name, p.Spec.NodeName)
+	}
 }

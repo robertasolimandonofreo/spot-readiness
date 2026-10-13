@@ -25,11 +25,11 @@ func TestCSV(t *testing.T) {
 	if err != nil {
 		t.Fatalf("output is not valid CSV: %v", err)
 	}
-	if len(rows) != 3 || len(rows[0]) != 10 {
-		t.Fatalf("want header plus 2 rows of 10 columns, got %d rows", len(rows))
+	if len(rows) != 3 || len(rows[0]) != 11 {
+		t.Fatalf("want header plus 2 rows of 11 columns, got %d rows", len(rows))
 	}
 	got := strings.Join(rows[1], "|")
-	want := "ready-with-caveats|85|shop|Deployment|web, v2|3|1500|false|SR006;SR009|0"
+	want := "ready-with-caveats|85|shop|Deployment|web, v2|3|1500|false|SR006;SR009|0|"
 	if got != want {
 		t.Fatalf("row = %q, want %q", got, want)
 	}
@@ -82,5 +82,21 @@ func TestMarkdownNothingToFix(t *testing.T) {
 	Markdown(&buf, Build([]rules.Result{{Kind: "Deployment", Namespace: "n", Name: "ok", Replicas: 3, CPUMilli: 10, Score: 100, Verdict: rules.Ready}}, 0))
 	if !strings.Contains(buf.String(), "No workload needs attention.") {
 		t.Fatal(buf.String())
+	}
+}
+
+func TestTableRuntimeRisk(t *testing.T) {
+	rt := &rules.Runtime{Pods: 4, Zones: 1, SpotPods: 4, BlastRadius: 25, Resilience: "low",
+		Nodes:    []rules.RuntimeNode{{Name: "ip-1", Zone: "us-east-1a", CapacityType: "spot", InstanceType: "m5.large", Pods: 4}},
+		Warnings: []string{"All 4 pods run in the same Availability Zone (us-east-1a)."}}
+	rep := Build([]rules.Result{{Kind: "Deployment", Namespace: "shop", Name: "api", Replicas: 4, Score: 85,
+		Verdict: rules.Caveats, Runtime: rt}}, 0)
+	var buf bytes.Buffer
+	Table(&buf, rep, true)
+	for _, want := range []string{"RUNTIME RISK", "shop/deployment/api", "ip-1  us-east-1a  spot", "⚠ All 4 pods",
+		"Runtime resilience: LOW", "Manifest readiness: 85"} {
+		if !strings.Contains(buf.String(), want) {
+			t.Errorf("missing %q\n%s", want, buf.String())
+		}
 	}
 }

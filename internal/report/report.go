@@ -80,7 +80,7 @@ func JSON(w io.Writer, r Report) error {
 func CSV(w io.Writer, r Report) error {
 	cw := csv.NewWriter(w)
 	if err := cw.Write([]string{"verdict", "score", "namespace", "kind", "name", "replicas",
-		"cpu_request_millis", "already_on_spot", "findings", "flexibility_score"}); err != nil {
+		"cpu_request_millis", "already_on_spot", "findings", "flexibility_score", "runtime_resilience"}); err != nil {
 		return err
 	}
 	for _, res := range r.Results {
@@ -88,9 +88,13 @@ func CSV(w io.Writer, r Report) error {
 		for _, f := range res.Findings {
 			ids = append(ids, f.Rule)
 		}
+		resilience := ""
+		if res.Runtime != nil {
+			resilience = res.Runtime.Resilience
+		}
 		if err := cw.Write([]string{string(res.Verdict), strconv.Itoa(res.Score), res.Namespace, res.Kind,
 			res.Name, strconv.Itoa(int(res.Replicas)), strconv.FormatInt(res.CPUMilli, 10),
-			strconv.FormatBool(res.OnSpot), strings.Join(ids, ";"), strconv.Itoa(res.Flexibility.Score)}); err != nil {
+			strconv.FormatBool(res.OnSpot), strings.Join(ids, ";"), strconv.Itoa(res.Flexibility.Score), resilience}); err != nil {
 			return err
 		}
 	}
@@ -178,6 +182,7 @@ func Table(w io.Writer, r Report, verbose bool) {
 	tw.Flush()
 
 	flexibility(w, r.Results)
+	runtimeRisk(w, r.Results, verbose)
 
 	if verbose {
 		fmt.Fprintln(w)
@@ -234,4 +239,47 @@ func flexibility(w io.Writer, results []rules.Result) {
 			fl.Score, zones, families, fl.Constraints)
 	}
 	tw.Flush()
+}
+
+// runtimeRisk prints, for workloads whose running pods are not well spread, where the pods are and
+// what one lost node or zone would cost. Well spread workloads (resilience "high" with no warning)
+// are left out. With verbose, every listed workload shows its nodes.
+func runtimeRisk(w io.Writer, results []rules.Result, verbose bool) {
+	var rows []rules.Result
+	for _, res := range results {
+		if rt := res.Runtime; rt != nil && (rt.Resilience != "high" || len(rt.Warnings) > 0) {
+			rows = append(rows, res)
+		}
+	}
+	if len(rows) == 0 {
+		return
+	}
+	order := map[string]int{"low": 0, "medium": 1, "high": 2}
+	sort.SliceStable(rows, func(i, j int) bool { return order[rows[i].Runtime.Resilience] < order[rows[j].Runtime.Resilience] })
+	fmt.Fprint(w, "\nRUNTIME RISK (where the pods run now; well spread workloads are not listed)\n")
+	for _, res := range rows {
+		rt := res.Runtime
+		fmt.Fprintf(w, "\n%s/%s/%s\n", res.Namespace, strings.ToLower(res.Kind), res.Name)
+		fmt.Fprintf(w, "  Pods: %d on %d nodes, %d zones, %d on Spot. Blast radius of one node: %d%%\n",
+			rt.Pods, len(rt.Nodes), rt.Zones, rt.SpotPods, rt.BlastRadius)
+		if verbose {
+			tw := tabwriter.NewWriter(w, 0, 4, 2, ' ', 0)
+			fmt.Fprintln(tw, "  NODE\tAZ\tCAPACITY\tINSTANCE\tPODS")
+			for _, n := range rt.Nodes {
+				fmt.Fprintf(tw, "  %s\t%s\t%s\t%s\t%d\n", n.Name, dash(n.Zone), dash(n.CapacityType), dash(n.InstanceType), n.Pods)
+			}
+			tw.Flush()
+		}
+		for _, warning := range rt.Warnings {
+			fmt.Fprintf(w, "  ⚠ %s\n", warning)
+		}
+		fmt.Fprintf(w, "  Runtime resilience: %s\n  Manifest readiness: %d\n", strings.ToUpper(rt.Resilience), res.Score)
+	}
+}
+
+func dash(s string) string {
+	if s == "" {
+		return "-"
+	}
+	return s
 }

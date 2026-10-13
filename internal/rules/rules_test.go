@@ -439,3 +439,65 @@ func TestFlexibilityRules(t *testing.T) {
 		})
 	}
 }
+
+func TestRuntimePlacement(t *testing.T) {
+	spot := func(name, zone, itype string) Node {
+		return Node{Name: name, Zone: zone, CapacityType: "spot", InstanceType: itype}
+	}
+	cases := []struct {
+		name       string
+		nodes      []Node
+		pods       []string // node of each pod
+		resilience string
+		blast      int
+		zones      int
+		warning    string // substring expected in a warning; empty means no warning
+	}{
+		{"all pods on one node", []Node{spot("n1", "a", "m5.large")}, []string{"n1", "n1", "n1"},
+			"low", 100, 1, "All 3 pods run on one node (n1)"},
+		{"single pod", []Node{spot("n1", "a", "m5.large")}, []string{"n1"}, "low", 100, 1, "Only 1 pod"},
+		{"same zone, several nodes", []Node{spot("n1", "a", "m5.large"), spot("n2", "a", "c5.large"), spot("n3", "a", "r5.large"), spot("n4", "a", "m6.large")},
+			[]string{"n1", "n2", "n3", "n4"}, "low", 25, 1, "same Availability Zone (a)"},
+		{"half on one node", []Node{spot("n1", "a", "m5.large"), spot("n2", "b", "c5.large")},
+			[]string{"n1", "n1", "n2", "n2"}, "medium", 50, 2, "(50%)"},
+		{"spread", []Node{spot("n1", "a", "m5.large"), spot("n2", "b", "c5.large"), {Name: "n3", Zone: "c", CapacityType: "on-demand"}},
+			[]string{"n1", "n2", "n3"}, "high", 33, 3, ""},
+		{"spot pods in one instance type pool", []Node{spot("n1", "a", "m5.large"), spot("n2", "b", "m5.large"), spot("n3", "c", "m5.large")},
+			[]string{"n1", "n2", "n3"}, "high", 33, 3, "all m5.large"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			inv := inventoryWithPDB()
+			inv.SetNodes(c.nodes)
+			for _, n := range c.pods {
+				inv.AddPod("shop", "Deployment", "web", n)
+			}
+			rt := Evaluate(inv, healthy()).Runtime
+			if rt == nil {
+				t.Fatal("no runtime analysis")
+			}
+			if rt.Resilience != c.resilience || rt.BlastRadius != c.blast || rt.Zones != c.zones {
+				t.Fatalf("got resilience %s blast %d zones %d, want %s %d %d (%v)", rt.Resilience, rt.BlastRadius, rt.Zones, c.resilience, c.blast, c.zones, rt.Warnings)
+			}
+			joined := strings.Join(rt.Warnings, "\n")
+			if c.warning == "" && joined != "" || !strings.Contains(joined, c.warning) {
+				t.Fatalf("warnings = %q, want one containing %q", joined, c.warning)
+			}
+		})
+	}
+	// Without a cluster there is no runtime view, and it never changes the manifest score.
+	if Evaluate(inventoryWithPDB(), healthy()).Runtime != nil {
+		t.Fatal("file mode must not report runtime placement")
+	}
+}
+
+func TestNodeFromLabels(t *testing.T) {
+	n := NodeFromLabels("ip-1", map[string]string{"topology.kubernetes.io/zone": "us-east-1a",
+		"node.kubernetes.io/instance-type": "m5.large", "eks.amazonaws.com/capacityType": "SPOT"})
+	if n.Zone != "us-east-1a" || n.InstanceType != "m5.large" || n.CapacityType != "spot" {
+		t.Fatalf("%+v", n)
+	}
+	if NodeFromLabels("x", map[string]string{"karpenter.sh/capacity-type": "on-demand"}).CapacityType != "on-demand" {
+		t.Fatal("karpenter on-demand")
+	}
+}
