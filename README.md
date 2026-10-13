@@ -139,7 +139,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - id: spot
-        uses: robertasolimandonofreo/spot-readiness@v0.7.1
+        uses: robertasolimandonofreo/spot-readiness@v0.8.0
         with:
           path: ./k8s            # files or directories, separated by spaces
           comment: "true"        # one comment, updated on every push
@@ -157,7 +157,7 @@ jobs:
 | `upload-sarif` | `false` | Upload the SARIF report to code scanning (needs `security-events: write`) |
 | `config` | empty | Config file; defaults to `.spot-readiness.yaml` in the repository root |
 | `include-system` | `false` | Also analyze `kube-system` and the other system namespaces |
-| `version` | the action's version | A release such as `v0.7.1`; with a branch ref it uses the latest release |
+| `version` | the action's version | A release such as `v0.8.0`; with a branch ref it uses the latest release |
 | `github-token` | `github.token` | Token used to comment |
 
 Outputs: `potential-percent`, `ready`, `caveats` and `not-ready`. It runs on Linux and macOS runners.
@@ -449,7 +449,7 @@ permissions:
   security-events: write
 steps:
   - uses: actions/checkout@v4
-  - uses: robertasolimandonofreo/spot-readiness@v0.7.1
+  - uses: robertasolimandonofreo/spot-readiness@v0.8.0
     with:
       path: k8s
       upload-sarif: "true"
