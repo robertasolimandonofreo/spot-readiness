@@ -1,6 +1,7 @@
 # spot-readiness
 
-Tells you which Kubernetes workloads can run on Spot capacity, and what to fix in the ones that cannot.
+Spot readiness assessment for Kubernetes, with deep AWS EKS and Karpenter support. It tells you which
+workloads can run on Spot capacity, and what to fix in the ones that cannot.
 
 "Use Spot for interruption-tolerant workloads" is common advice. Finding out which workloads those
 are is usually a guess. `spot-readiness` reads your Deployments, StatefulSets, Argo Rollouts, Jobs, CronJobs, KEDA ScaledJobs
@@ -8,6 +9,19 @@ and Pods and checks the things that decide whether an interruption is a non-even
 
 > **Status: early.** It scans YAML/JSON manifests, or reads a live cluster (read-only). It is a static
 > analysis of configuration, not a guarantee: see [Limits](#limits).
+
+## Scope: AWS first
+
+The workload rules (replicas, probes, PodDisruptionBudgets, graceful shutdown, Jobs, scheduling
+constraints) are plain Kubernetes and apply to any cluster. Everything that depends on how the
+capacity is provided is built for **AWS**: the Spot capacity type is read from the Karpenter
+(`karpenter.sh/capacity-type`) and EKS managed node group (`eks.amazonaws.com/capacityType`)
+labels, the interruption handling checks the Karpenter interruption queue and the AWS Node
+Termination Handler, the 2-minute notice in SR003 is the AWS Spot notice, and the NodePool rules
+read Karpenter and `EC2NodeClass`. GKE Spot VMs and AKS Spot node pools are not recognized: on those
+clusters the workload rules still work, and the runtime, interruption and NodePool views report no
+Spot capacity. The first release of multi-cloud support would go behind a provider interface
+that reads the capacity type of a node; it is not started.
 
 ## Install
 
@@ -499,8 +513,9 @@ workloads, not to Karpenter NodePools: use `rules` to change or turn off a KR ru
 
 ## Roadmap
 
-Nothing is planned. If asked: Argo Rollouts that use `workloadRef` (today the referenced
-Deployment is analyzed).
+Nothing is scheduled. If asked: Argo Rollouts that use `workloadRef` (today the referenced
+Deployment is analyzed), and GKE and AKS capacity types behind a provider interface (see
+[Scope](#scope-aws-first)).
 
 Checking whether a Job checkpoints its progress is not on the roadmap: it is behavior of the
 application, and manifests do not show it.
