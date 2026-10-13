@@ -46,7 +46,17 @@ helm template my-release ./chart | spot-readiness scan -
 kustomize build overlays/prod | spot-readiness scan -f json -
 spot-readiness scan -f csv ./k8s > workloads.csv
 spot-readiness scan --fail-on not-ready ./k8s  # exit 1 in CI
+spot-readiness scan --suggest ./k8s            # a suggested fix and a docs link for every finding
+spot-readiness scan -f sarif ./k8s > spot.sarif  # GitHub Code Scanning, on the manifest line
+spot-readiness scan --baseline base.json --fail-on-regression ./k8s  # fail only on new findings
+spot-readiness plan ./k8s                      # what to move now, after changes, or never
+spot-readiness scan --karpenter                # cluster mode, also checks the NodePools
 ```
+
+See [Migration plan](#migration-plan-plan), [Suggested fixes](#suggested-fixes---suggest),
+[SARIF](#sarif-and-code-scanning--f-sarif), [Regressions](#regressions---baseline),
+[Configuration](#configuration-spot-readinessyaml), [Karpenter NodePools](#karpenter-nodepools---karpenter)
+and [Interruption handling](#interruption-handling-cluster-mode).
 
 ### Reading a cluster
 
