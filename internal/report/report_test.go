@@ -25,11 +25,11 @@ func TestCSV(t *testing.T) {
 	if err != nil {
 		t.Fatalf("output is not valid CSV: %v", err)
 	}
-	if len(rows) != 3 || len(rows[0]) != 9 {
-		t.Fatalf("want header plus 2 rows of 9 columns, got %d rows", len(rows))
+	if len(rows) != 3 || len(rows[0]) != 10 {
+		t.Fatalf("want header plus 2 rows of 10 columns, got %d rows", len(rows))
 	}
 	got := strings.Join(rows[1], "|")
-	want := "ready-with-caveats|85|shop|Deployment|web, v2|3|1500|false|SR006;SR009"
+	want := "ready-with-caveats|85|shop|Deployment|web, v2|3|1500|false|SR006;SR009|0"
 	if got != want {
 		t.Fatalf("row = %q, want %q", got, want)
 	}

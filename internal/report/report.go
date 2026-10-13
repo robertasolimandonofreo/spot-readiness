@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"sort"
 	"strconv"
 	"strings"
 	"text/tabwriter"
@@ -79,7 +80,7 @@ func JSON(w io.Writer, r Report) error {
 func CSV(w io.Writer, r Report) error {
 	cw := csv.NewWriter(w)
 	if err := cw.Write([]string{"verdict", "score", "namespace", "kind", "name", "replicas",
-		"cpu_request_millis", "already_on_spot", "findings"}); err != nil {
+		"cpu_request_millis", "already_on_spot", "findings", "flexibility_score"}); err != nil {
 		return err
 	}
 	for _, res := range r.Results {
@@ -89,7 +90,7 @@ func CSV(w io.Writer, r Report) error {
 		}
 		if err := cw.Write([]string{string(res.Verdict), strconv.Itoa(res.Score), res.Namespace, res.Kind,
 			res.Name, strconv.Itoa(int(res.Replicas)), strconv.FormatInt(res.CPUMilli, 10),
-			strconv.FormatBool(res.OnSpot), strings.Join(ids, ";")}); err != nil {
+			strconv.FormatBool(res.OnSpot), strings.Join(ids, ";"), strconv.Itoa(res.Flexibility.Score)}); err != nil {
 			return err
 		}
 	}
@@ -176,6 +177,8 @@ func Table(w io.Writer, r Report, verbose bool) {
 	}
 	tw.Flush()
 
+	flexibility(w, r.Results)
+
 	if verbose {
 		fmt.Fprintln(w)
 		for _, res := range r.Results {
@@ -200,4 +203,35 @@ func Table(w io.Writer, r Report, verbose bool) {
 		fmt.Fprintf(w, "Estimate the savings: %s\n", s.CalculatorURL)
 	}
 	fmt.Fprintln(w, "Ready does not mean safe: this tool only sees configuration, not how your application behaves.")
+}
+
+// flexibility prints the workloads whose scheduling constraints narrow their Spot capacity pools,
+// least flexible first. Workloads with no such constraint (score 100) are left out.
+func flexibility(w io.Writer, results []rules.Result) {
+	var rows []rules.Result
+	for _, res := range results {
+		if res.Flexibility.Score < 100 {
+			rows = append(rows, res)
+		}
+	}
+	if len(rows) == 0 {
+		return
+	}
+	sort.SliceStable(rows, func(i, j int) bool { return rows[i].Flexibility.Score < rows[j].Flexibility.Score })
+	fmt.Fprint(w, "\nSPOT FLEXIBILITY (workloads with no placement constraints are not listed)\n\n")
+	tw := tabwriter.NewWriter(w, 0, 4, 2, ' ', 0)
+	fmt.Fprintln(tw, "WORKLOAD\tSCORE\tAZS\tFAMILIES\tCONSTRAINTS")
+	for _, res := range rows {
+		fl := res.Flexibility
+		zones, families := "any", "any"
+		if fl.Zones > 0 {
+			zones = strconv.Itoa(fl.Zones)
+		}
+		if len(fl.Families) > 0 {
+			families = strings.Join(fl.Families, ",")
+		}
+		fmt.Fprintf(tw, "%s/%s/%s\t%d\t%s\t%s\t%s\n", res.Namespace, strings.ToLower(res.Kind), res.Name,
+			fl.Score, zones, families, fl.Constraints)
+	}
+	tw.Flush()
 }

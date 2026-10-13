@@ -159,10 +159,30 @@ least 50 points.
 | SR013 | info | Progress is lost on interruption unless the job checkpoints (cannot be verified) |
 | SR014 | blocker | A matching PodDisruptionBudget allows zero voluntary disruptions (for example `minAvailable` equal to the replicas): nodes cannot be drained |
 | SR015 | caveat | A matching PodDisruptionBudget without `unhealthyPodEvictionPolicy: AlwaysAllow`: a running but not ready pod can block a drain |
+| SR016 | caveat | Restricted to a single Availability Zone by `nodeSelector` or required `nodeAffinity` |
+| SR017 | caveat | Requires one specific instance type, or pins to nodes by `kubernetes.io/hostname` |
+| SR018 | info | Limits Spot capacity flexibility: 2 to 9 instance types, 1 or 2 instance families, or GPUs |
+| SR019 | caveat | Required `nodeSelector` and `nodeAffinity` pin down three or more aspects of the placement (zone, instance, architecture, custom labels) |
 
 SR001, SR004, SR005, SR006, SR009, SR014 and SR015 apply to long-running workloads (Deployments, StatefulSets,
-Argo Rollouts and bare Pods). SR010 to SR013 apply to Jobs, CronJobs and KEDA ScaledJobs. SR002, SR003, SR007 and
-SR008 apply to all of them.
+Argo Rollouts and bare Pods). SR010 to SR013 apply to Jobs, CronJobs and KEDA ScaledJobs. SR002, SR003, SR007, SR008 and
+SR016 to SR019 apply to all of them.
+
+### Spot flexibility
+
+Surviving a restart is not enough: Spot works best when a workload can move between many capacity
+pools (zone, instance type, family). Each workload also gets a flexibility score from 100 (it can
+run anywhere) down to 0, shown in the `SPOT FLEXIBILITY` table (workloads with no placement
+constraints are left out), in the JSON `flexibility` object and in the CSV `flexibility_score`
+column. It is separate from the readiness score; only SR016 to SR019 affect that one.
+
+It reads `nodeSelector` and required `nodeAffinity` (alternative terms are combined, so a workload
+that may run in three zones counts as three), for zones, instance type, family, category,
+generation, architecture, GPU labels and custom labels, plus GPU resource requests. Constraints
+are `low` (80 and above), `medium` (50 to 79) or `high`. The score and the instance type
+threshold of 10 follow AWS's advice to be flexible across many instance types on Spot. It does not
+read `tolerations`, `topologySpreadConstraints` or preferred affinity, which do not narrow where a
+pod can run, and it cannot see the instance types a Karpenter NodePool or node group allows.
 
 The "Spot potential" line is the share of requested CPU in long-running workloads that are ready or
 ready with caveats. Jobs, CronJobs and ScaledJobs are not counted: they request CPU only while they run, so

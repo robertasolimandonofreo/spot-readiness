@@ -43,6 +43,10 @@ var Descriptions = []struct{ ID, Severity, Text string }{
 	{"SR013", "info", "Job progress is lost on interruption unless the job checkpoints (cannot be verified)"},
 	{"SR014", "blocker", "PodDisruptionBudget allows zero voluntary disruptions: nodes cannot be drained"},
 	{"SR015", "caveat", "PodDisruptionBudget without unhealthyPodEvictionPolicy AlwaysAllow: unhealthy pods can block a drain"},
+	{"SR016", "caveat", "Workload is restricted to a single Availability Zone"},
+	{"SR017", "caveat", "Workload requires a specific instance type (or node)"},
+	{"SR018", "info", "Workload limits Spot capacity flexibility: few instance types or families, or GPUs"},
+	{"SR019", "caveat", "Required nodeSelector and nodeAffinity pin down three or more aspects of the placement"},
 }
 
 type Finding struct {
@@ -71,6 +75,9 @@ type Result struct {
 	Score    int       `json:"score"`
 	Verdict  Verdict   `json:"verdict"`
 	Findings []Finding `json:"findings"`
+	// Flexibility is how many capacity pools the workload can use. It is reported on its own and
+	// is not part of the score; the SR016 to SR019 findings are.
+	Flexibility Flexibility `json:"flexibility"`
 }
 
 type scope int
@@ -203,6 +210,45 @@ var all = []rule{
 		}
 		return f("SR009", Info, "no preStop hook: in-flight requests may be cut when the node is reclaimed")
 	}},
+	{"SR016", scopeAll, func(_ *Inventory, w Workload) *Finding {
+		if p := placementOf(w); len(p.zones) == 1 {
+			return f("SR016", Caveat, "restricted to a single Availability Zone (%s): one zone running out of Spot capacity leaves it without nodes", sortedKeys(p.zones)[0])
+		}
+		return nil
+	}},
+	{"SR017", scopeAll, func(_ *Inventory, w Workload) *Finding {
+		p := placementOf(w)
+		switch {
+		case p.hostname:
+			return f("SR017", Caveat, "pinned to specific nodes by kubernetes.io/hostname: it cannot move to another Spot node")
+		case len(p.types) == 1:
+			return f("SR017", Caveat, "requires instance type %s: a single Spot pool means one capacity shortage leaves it without nodes", sortedKeys(p.types)[0])
+		}
+		return nil
+	}},
+	{"SR018", scopeAll, func(_ *Inventory, w Workload) *Finding {
+		p := placementOf(w)
+		var why []string
+		if n := len(p.types); n > 1 && n < minSpotInstanceTypes {
+			why = append(why, fmt.Sprintf("only %d instance types (AWS recommends at least %d)", n, minSpotInstanceTypes))
+		}
+		if n := len(p.families); n > 0 && n <= 2 && len(p.types) == 0 {
+			why = append(why, fmt.Sprintf("only %d instance family value(s): %s", n, strings.Join(sortedKeys(p.families), ",")))
+		}
+		if p.gpu {
+			why = append(why, "needs GPUs, which few instance families offer")
+		}
+		if len(why) == 0 {
+			return nil
+		}
+		return f("SR018", Info, "limits Spot capacity flexibility: %s", strings.Join(why, "; "))
+	}},
+	{"SR019", scopeAll, func(_ *Inventory, w Workload) *Finding {
+		if n := placementOf(w).dimensions(); n >= 3 {
+			return f("SR019", Caveat, "required nodeSelector and nodeAffinity pin down %d aspects of the placement (zone, instance, architecture or custom labels): few nodes can match", n)
+		}
+		return nil
+	}},
 	{"SR010", scopeBatch, func(_ *Inventory, w Workload) *Finding {
 		limit := int32(6) // the Kubernetes default
 		if w.BackoffLimit != nil {
@@ -252,7 +298,8 @@ func Evaluate(inv *Inventory, w Workload) Result {
 		replicas = min
 	}
 	res := Result{Kind: w.Kind, Namespace: w.Namespace, Name: w.Name, Replicas: replicas, Batch: w.Batch,
-		CPUMilli: cpuMilli(w, replicas), OnSpot: onSpot(w), Score: 100, Verdict: Ready, Findings: []Finding{}}
+		CPUMilli: cpuMilli(w, replicas), OnSpot: onSpot(w), Score: 100, Verdict: Ready, Findings: []Finding{},
+		Flexibility: flexibilityOf(w)}
 	for _, r := range all {
 		if (r.scope == scopeBatch && !w.Batch) || (r.scope == scopeService && w.Batch) {
 			continue

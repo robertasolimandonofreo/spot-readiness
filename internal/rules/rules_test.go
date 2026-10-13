@@ -1,6 +1,7 @@
 package rules
 
 import (
+	"strings"
 	"testing"
 
 	autoscalingv2 "k8s.io/api/autoscaling/v2"
@@ -352,5 +353,89 @@ func TestScalerDefaults(t *testing.T) {
 	}
 	if _, ok := FromRollout("shop", "web", RolloutSpec{WorkloadRef: []byte(`{"name":"x"}`)}); ok {
 		t.Fatal("a Rollout with workloadRef must be skipped")
+	}
+}
+
+func selector(w *Workload, kv map[string]string) { w.Template.Spec.NodeSelector = kv }
+
+func requireAffinity(w *Workload, terms ...corev1.NodeSelectorTerm) {
+	w.Template.Spec.Affinity = &corev1.Affinity{NodeAffinity: &corev1.NodeAffinity{
+		RequiredDuringSchedulingIgnoredDuringExecution: &corev1.NodeSelector{NodeSelectorTerms: terms},
+	}}
+}
+
+func in(key string, values ...string) corev1.NodeSelectorTerm {
+	return corev1.NodeSelectorTerm{MatchExpressions: []corev1.NodeSelectorRequirement{
+		{Key: key, Operator: corev1.NodeSelectorOpIn, Values: values}}}
+}
+
+func TestFlexibilityRules(t *testing.T) {
+	zone, itype := "topology.kubernetes.io/zone", "node.kubernetes.io/instance-type"
+	cases := []struct {
+		name    string
+		mutate  func(w *Workload)
+		want    map[string]Severity
+		score   int
+		zones   int
+		bucket  string
+		famlist string
+	}{
+		{"unconstrained", func(*Workload) {}, nil, 100, 0, "low", ""},
+		{"os and capacity type are neutral", func(w *Workload) {
+			selector(w, map[string]string{"kubernetes.io/os": "linux", "karpenter.sh/capacity-type": "spot"})
+		}, nil, 100, 0, "low", ""},
+		{"single zone", func(w *Workload) { selector(w, map[string]string{zone: "us-east-1a"}) },
+			map[string]Severity{"SR016": Caveat}, 65, 1, "medium", ""},
+		{"two zones in affinity", func(w *Workload) { requireAffinity(w, in(zone, "us-east-1a", "us-east-1b")) },
+			nil, 85, 2, "low", ""},
+		{"zones in separate terms are alternatives", func(w *Workload) {
+			requireAffinity(w, in(zone, "us-east-1a"), in(zone, "us-east-1b"), in(zone, "us-east-1c"))
+		}, nil, 100, 3, "low", ""},
+		{"a term without the key lifts the limit", func(w *Workload) {
+			requireAffinity(w, in(zone, "us-east-1a"), in("team", "x"))
+		}, nil, 100, 0, "low", ""},
+		{"specific instance type", func(w *Workload) { selector(w, map[string]string{itype: "m5.large"}) },
+			map[string]Severity{"SR017": Caveat}, 55, 0, "medium", "m5"},
+		{"a few instance types", func(w *Workload) {
+			requireAffinity(w, in(itype, "c5.large", "m5.large", "r5.large"))
+		}, map[string]Severity{"SR018": Info}, 70, 0, "medium", "c5,m5,r5"},
+		{"many instance types", func(w *Workload) {
+			requireAffinity(w, in(itype, "a.x", "b.x", "c.x", "d.x", "e.x", "f.x", "g.x", "h.x", "i.x", "j.x"))
+		}, nil, 100, 0, "low", "a,b,c,d,e,f,g,h,i,j"},
+		{"one instance family", func(w *Workload) {
+			selector(w, map[string]string{"karpenter.k8s.aws/instance-family": "g5"})
+		}, map[string]Severity{"SR018": Info}, 70, 0, "medium", "g5"},
+		{"gpu", func(w *Workload) {
+			w.Template.Spec.Containers[0].Resources.Limits = corev1.ResourceList{"nvidia.com/gpu": resource.MustParse("1")}
+		}, map[string]Severity{"SR018": Info}, 75, 0, "medium", ""},
+		{"hostname", func(w *Workload) { selector(w, map[string]string{"kubernetes.io/hostname": "node-1"}) },
+			map[string]Severity{"SR017": Caveat}, 55, 0, "medium", ""},
+		{"three pinned aspects", func(w *Workload) {
+			selector(w, map[string]string{zone: "us-east-1a", "kubernetes.io/arch": "arm64", "pool": "gpu"})
+		}, map[string]Severity{"SR016": Caveat, "SR019": Caveat}, 50, 1, "medium", ""},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			w := healthy()
+			c.mutate(&w)
+			r := Evaluate(inventoryWithPDB(), w)
+			got := ids(r)
+			for id, sev := range c.want {
+				if got[id] != sev {
+					t.Errorf("want %s as %s, got %v", id, sev, got)
+				}
+			}
+			for _, id := range []string{"SR016", "SR017", "SR018", "SR019"} {
+				if _, ok := c.want[id]; !ok {
+					if _, found := got[id]; found {
+						t.Errorf("unexpected %s", id)
+					}
+				}
+			}
+			fl := r.Flexibility
+			if fl.Score != c.score || fl.Zones != c.zones || fl.Constraints != c.bucket || strings.Join(fl.Families, ",") != c.famlist {
+				t.Errorf("flexibility = %+v, want score %d zones %d %s families %q", fl, c.score, c.zones, c.bucket, c.famlist)
+			}
+		})
 	}
 }
