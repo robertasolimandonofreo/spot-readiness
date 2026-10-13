@@ -14,6 +14,10 @@ func runScan(args []string, env Env) int {
 	if !o.validate(fs.Args(), env) {
 		return 2
 	}
+	if o.hasPricingFlags() {
+		fmt.Fprintln(env.Stderr, "--pricing and its flags apply to plan, not scan")
+		return 2
+	}
 	switch o.format {
 	case "table", "json", "csv", "markdown", "sarif":
 	default:

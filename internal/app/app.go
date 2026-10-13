@@ -41,6 +41,13 @@ Flags for scan (plan and explain take the same input flags; plan also takes -f t
       --baseline string   JSON report (-f json) to compare with: shows new and resolved findings
       --fail-on-regression exit 1 when a blocker or caveat finding is new compared with --baseline
       --fail-on string    exit 1 when a workload is "not-ready" or "caveats" (default: never)
+
+Flags for plan only:
+      --pricing string    add a monthly cost estimate: static (prices you give) or aws (the AWS Price List API)
+      --price-file string, --on-demand-vcpu-hour float, --spot-discount float, --currency string
+                          the prices for --pricing static
+      --region string, --instance-type string
+                          the region and the reference instance type (default m6i.large) for --pricing aws
 `
 
 // Run runs the command with the arguments after the program name and returns the exit code: 0 on

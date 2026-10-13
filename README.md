@@ -86,7 +86,7 @@ The minimum RBAC is `list` on `deployments`, `statefulsets`, `daemonsets` (apps)
 `jobs` and `cronjobs` (batch), `poddisruptionbudgets` (policy) and `horizontalpodautoscalers`
 (autoscaling). `nodes` (core) and `replicasets` (apps) are optional and enable the runtime risk view. `--karpenter` also needs `list` on `nodepools`, `nodeclaims` (karpenter.sh) and `ec2nodeclasses` (karpenter.k8s.aws). Argo Rollouts (`rollouts`) and KEDA (`scaledobjects`, `scaledjobs`) are read too when
 those CRDs exist. Everything except Deployments, StatefulSets and Pods is optional: a missing permission or
-CRD only means that part is not analyzed. The tool never creates, changes or deletes anything and sends nothing outside your machine.
+CRD only means that part is not analyzed. The tool never creates, changes or deletes anything, and sends nothing outside your machine unless you ask for `plan --pricing aws`, which calls the AWS Price List API and downloads the public Spot Instance Advisor data.
 
 Example output:
 
@@ -358,6 +358,39 @@ phase 0 lists what the platform needs before the first move: a Karpenter interru
 Node Termination Handler (see Interruption handling), and, with `--karpenter`, the NodePool
 caveats. The groups and the order are heuristics from the manifests: they do not know how your
 application behaves, how much a move saves in money, or which teams own what.
+
+### Estimated cost (`--pricing`)
+
+`plan --pricing` adds a monthly estimate: what the requested CPU costs on-demand now, after phase 1
+and after phase 2, and the savings. The tool has no prices of its own, so you choose where they come from:
+
+```bash
+# prices you give (nothing leaves your machine)
+spot-readiness plan --pricing static --on-demand-vcpu-hour 0.048 --spot-discount 0.7 ./k8s
+spot-readiness plan --pricing static --price-file prices.yaml ./k8s   # onDemandVcpuHour, spotDiscount, currency
+
+# the AWS Price List API (needs AWS credentials) and the Spot Instance Advisor
+spot-readiness plan --pricing aws --region us-east-1 --instance-type m6i.large ./k8s
+```
+
+```
+ESTIMATED MONTHLY COMPUTE
+
+Current on-demand       $8,420
+After phase 1           $6,180
+After phase 2           $4,760
+
+Estimated savings       $3,660 / month (43.5%)
+```
+
+With `--pricing aws` the price of one reference instance type (default `m6i.large`) stands for the
+whole cluster: its on-demand price per vCPU-hour from the AWS Price List API, and the Spot savings from
+the public Spot Instance Advisor. It is an estimate from requested CPU only. Memory, storage,
+network, discounts such as Savings Plans, and your real mix of instance types are not included, and
+Spot prices move: do not read it as a billing forecast. Workloads in manual review, and
+those that stay on-demand, stay at the on-demand price. The estimate is also in the JSON `cost`
+object. The AWS provider is tested against a fake Price List and Advisor, not yet against the real
+AWS API.
 
 ## Suggested fixes (`--suggest`)
 

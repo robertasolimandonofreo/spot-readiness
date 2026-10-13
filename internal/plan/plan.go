@@ -10,6 +10,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/robertasolimandonofreo/spot-readiness/internal/pricing"
 	"github.com/robertasolimandonofreo/spot-readiness/internal/report"
 	"github.com/robertasolimandonofreo/spot-readiness/internal/rules"
 )
@@ -77,6 +78,8 @@ type Plan struct {
 	Phase2        []Entry  `json:"phase2"`
 	ManualReview  []Entry  `json:"manualReview"`
 	KeepOnDemand  []Entry  `json:"keepOnDemand"`
+	// Cost is the monthly estimate, present with --pricing.
+	Cost *pricing.Estimate `json:"cost,omitempty"`
 }
 
 // reviewChecklist is what to look at before moving a workload that holds state.
@@ -349,6 +352,7 @@ func Table(w io.Writer, p Plan, opts Options) {
 			fmt.Fprintf(w, "  %s  (%s)\n    %s\n", e.name(), e.detail(), e.Reason)
 		}
 	}
+	costTable(w, p.Cost)
 	fmt.Fprintln(w, "\nThe plan reads configuration only: test each move, start with a few replicas, and keep on-demand capacity as a fallback.")
 }
 
@@ -399,5 +403,58 @@ func Markdown(w io.Writer, p Plan) {
 			fmt.Fprintf(w, "- `%s` (%s): %s\n", e.name(), e.detail(), e.Reason)
 		}
 	}
+	costMarkdown(w, p.Cost)
 	fmt.Fprintln(w, "\n_The plan reads configuration only: test each move and keep on-demand capacity as a fallback._")
+}
+
+// money formats an amount with thousands separators: whole units from 100 up, cents below.
+func money(v float64, currency string) string {
+	symbol := currency + " "
+	if currency == "USD" {
+		symbol = "$"
+	}
+	if v < 100 {
+		return fmt.Sprintf("%s%.2f", symbol, v)
+	}
+	digits := strconv.FormatInt(int64(math.Round(v)), 10)
+	for i := len(digits) - 3; i > 0; i -= 3 {
+		digits = digits[:i] + "," + digits[i:]
+	}
+	return symbol + digits
+}
+
+func costTable(w io.Writer, c *pricing.Estimate) {
+	if c == nil {
+		return
+	}
+	cur := c.Rates.Currency
+	fmt.Fprint(w, "\nESTIMATED MONTHLY COMPUTE\n\n")
+	fmt.Fprintf(w, "Current on-demand       %s\n", money(c.CurrentOnDemand, cur))
+	fmt.Fprintf(w, "After phase 1           %s\n", money(c.AfterPhase1, cur))
+	fmt.Fprintf(w, "After phase 2           %s\n", money(c.AfterPhase2, cur))
+	fmt.Fprintf(w, "\nEstimated savings       %s / month (%.1f%%)\n", money(c.Savings, cur), c.SavingsPercent)
+	fmt.Fprintf(w, "\nESTIMATE: %s.\n", c.Disclaimer)
+	fmt.Fprintf(w, "Rates: %s per vCPU-hour on-demand, %s on Spot (%s).\n", money4(c.Rates.OnDemandVCPUHour, cur), money4(c.Rates.SpotVCPUHour, cur), c.Rates.Source)
+	for _, n := range c.Rates.Notes {
+		fmt.Fprintf(w, "Note: %s.\n", n)
+	}
+}
+
+// money4 formats a price per vCPU-hour, which needs four decimals.
+func money4(v float64, currency string) string {
+	symbol := currency + " "
+	if currency == "USD" {
+		symbol = "$"
+	}
+	return fmt.Sprintf("%s%.4f", symbol, v)
+}
+
+func costMarkdown(w io.Writer, c *pricing.Estimate) {
+	if c == nil {
+		return
+	}
+	cur := c.Rates.Currency
+	fmt.Fprintf(w, "\n### Estimated monthly compute\n\n| | |\n|---|---|\n| Current on-demand | %s |\n| After phase 1 | %s |\n| After phase 2 | %s |\n| Estimated savings | %s / month (%.1f%%) |\n",
+		money(c.CurrentOnDemand, cur), money(c.AfterPhase1, cur), money(c.AfterPhase2, cur), money(c.Savings, cur), c.SavingsPercent)
+	fmt.Fprintf(w, "\n_Estimate, not a billing forecast: %s. Rates: %s._\n", c.Disclaimer, c.Rates.Source)
 }

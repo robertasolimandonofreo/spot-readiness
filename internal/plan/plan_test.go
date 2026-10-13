@@ -5,6 +5,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/robertasolimandonofreo/spot-readiness/internal/pricing"
 	"github.com/robertasolimandonofreo/spot-readiness/internal/rules"
 )
 
@@ -134,5 +135,49 @@ func TestEmpty(t *testing.T) {
 	Table(&buf, p, Options{})
 	if p.Summary.PotentialPercent != 0 || strings.Contains(buf.String(), "Phase 1") || strings.Contains(buf.String(), "Manual review\n") {
 		t.Fatalf("empty plan: %s", buf.String())
+	}
+}
+
+func TestCostOutput(t *testing.T) {
+	p := Build([]rules.Result{
+		result("Deployment", "api", 40_000, 100, "high"),
+		result("Deployment", "checkout", 60_000, 85, "high", finding("SR006", rules.Caveat)),
+	}, nil)
+	est := pricing.Compute(pricing.Rates{OnDemandVCPUHour: 0.04, SpotVCPUHour: 0.012, Currency: "USD", Source: "prices given on the command line", Notes: []string{"the rate of one instance type stands for the whole cluster"}},
+		p.Summary.CPUMilli, p.Summary.ImmediateCPUMilli, p.Summary.PotentialCPUMilli)
+	p.Cost = &est
+	var table, md bytes.Buffer
+	Table(&table, p, Options{})
+	Markdown(&md, p)
+	// 100 vCPU: 2,920 now, 40 on Spot after phase 1 and all 100 after phase 2.
+	for _, want := range []string{"ESTIMATED MONTHLY COMPUTE", "Current on-demand       $2,920", "After phase 1           $2,102", "After phase 2           $876",
+		"Estimated savings       $2,044 / month (70.0%)", "ESTIMATE: an estimate from requested CPU only", "not a billing forecast",
+		"$0.0400 per vCPU-hour on-demand, $0.0120 on Spot (prices given on the command line)", "Note: the rate of one instance type"} {
+		if !strings.Contains(table.String(), want) {
+			t.Errorf("table is missing %q\n%s", want, table.String())
+		}
+	}
+	for _, want := range []string{"### Estimated monthly compute", "| Current on-demand | $2,920 |", "| Estimated savings | $2,044 / month (70.0%) |", "Estimate, not a billing forecast"} {
+		if !strings.Contains(md.String(), want) {
+			t.Errorf("markdown is missing %q\n%s", want, md.String())
+		}
+	}
+	// Without --pricing there is no estimate at all.
+	var plain bytes.Buffer
+	Table(&plain, Build([]rules.Result{result("Deployment", "api", 1000, 100, "high")}, nil), Options{})
+	if strings.Contains(plain.String(), "ESTIMATE") {
+		t.Fatal("the estimate must be opt-in")
+	}
+}
+
+func TestMoney(t *testing.T) {
+	cases := map[float64]string{0: "$0.00", 12.5: "$12.50", 99.99: "$99.99", 100: "$100", 8420.4: "$8,420", 1234567.8: "$1,234,568"}
+	for v, want := range cases {
+		if got := money(v, "USD"); got != want {
+			t.Errorf("money(%v) = %s, want %s", v, got, want)
+		}
+	}
+	if got := money(1500, "EUR"); got != "EUR 1,500" {
+		t.Errorf("EUR: %s", got)
 	}
 }

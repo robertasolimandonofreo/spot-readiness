@@ -22,6 +22,10 @@ func runExplain(args []string, env Env) int {
 		fmt.Fprintln(env.Stderr, "explain needs a rule (SR001 to SR019, KR001 to KR007) or a workload (namespace/name)")
 		return 2
 	}
+	if o.hasPricingFlags() {
+		fmt.Fprintln(env.Stderr, "--pricing and its flags apply to plan, not explain")
+		return 2
+	}
 	target, paths := fs.Arg(0), fs.Args()[1:]
 	if ruleID.MatchString(target) {
 		r, ok := explain.Find(strings.ToUpper(target))

@@ -20,6 +20,9 @@ import (
 type options struct {
 	format, failOn, kubeContext, kubeconfig, namespace, configPath, baselinePath string
 	verbose, includeSystem, karpenter, interruption, failOnRegression, suggest   bool
+	// The cost estimate belongs to plan: --pricing static|aws and what each provider needs.
+	pricing, priceFile, region, instanceType, currency string
+	onDemandPrice, spotDiscount                        float64
 }
 
 // newFlags returns a flag set that writes into the options.
@@ -44,6 +47,13 @@ func newFlags(name string, env Env) (*flag.FlagSet, *options) {
 	fs.StringVar(&o.kubeconfig, "kubeconfig", "", "kubeconfig file")
 	fs.StringVar(&o.namespace, "n", "", "namespace")
 	fs.StringVar(&o.namespace, "namespace", "", "namespace")
+	fs.StringVar(&o.pricing, "pricing", "", "estimate the cost: static or aws")
+	fs.StringVar(&o.priceFile, "price-file", "", "prices for --pricing static")
+	fs.Float64Var(&o.onDemandPrice, "on-demand-vcpu-hour", 0, "on-demand price of one vCPU-hour")
+	fs.Float64Var(&o.spotDiscount, "spot-discount", 0, "how much cheaper Spot is, from 0 to below 1")
+	fs.StringVar(&o.currency, "currency", "", "currency of the prices (default USD)")
+	fs.StringVar(&o.region, "region", "", "AWS region for --pricing aws")
+	fs.StringVar(&o.instanceType, "instance-type", "", "reference instance type for --pricing aws (default m6i.large)")
 	return fs, o
 }
 
