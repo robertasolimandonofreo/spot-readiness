@@ -1,0 +1,137 @@
+name: spot-readiness
+description: Find out which Kubernetes workloads can safely run on Spot. Scans manifests and comments on the pull request.
+author: Roberta Soliman
+branding:
+  icon: server
+  color: blue
+
+inputs:
+  path:
+    description: Files or directories to scan, separated by spaces.
+    default: "."
+  fail-on:
+    description: Fail the job when a workload is "not-ready" or has "caveats". Empty never fails.
+    default: ""
+  comment:
+    description: Post (and keep updating) a comment on the pull request.
+    default: "false"
+  include-system:
+    description: Also analyze kube-system, kube-public and kube-node-lease.
+    default: "false"
+  version:
+    description: spot-readiness version to run, for example v0.6.0. Defaults to the version of this action when it is used with a version tag, otherwise the latest release.
+    default: ""
+  github-token:
+    description: Token used to comment on the pull request (needs pull-requests write permission).
+    default: ${{ github.token }}
+
+outputs:
+  potential-percent:
+    description: Share of requested CPU, in long-running workloads, that is ready or ready with caveats.
+    value: ${{ steps.scan.outputs.potential-percent }}
+  ready:
+    description: Number of ready workloads.
+    value: ${{ steps.scan.outputs.ready }}
+  caveats:
+    description: Number of workloads ready with caveats.
+    value: ${{ steps.scan.outputs.caveats }}
+  not-ready:
+    description: Number of workloads that are not ready.
+    value: ${{ steps.scan.outputs.not-ready }}
+
+runs:
+  using: composite
+  steps:
+    - name: Install spot-readiness
+      shell: bash
+      env:
+        INPUT_VERSION: ${{ inputs.version }}
+        ACTION_REF: ${{ github.action_ref }}
+        GH_TOKEN: ${{ inputs.github-token }}
+        RUNNER_OS_NAME: ${{ runner.os }}
+        RUNNER_ARCH_NAME: ${{ runner.arch }}
+      run: |
+        set -euo pipefail
+        case "$RUNNER_OS_NAME" in
+          Linux) os=linux ;;
+          macOS) os=darwin ;;
+          *) echo "::error::spot-readiness supports Linux and macOS runners, not $RUNNER_OS_NAME"; exit 1 ;;
+        esac
+        case "$RUNNER_ARCH_NAME" in
+          X64) arch=amd64 ;;
+          ARM64) arch=arm64 ;;
+          *) echo "::error::unsupported runner architecture $RUNNER_ARCH_NAME"; exit 1 ;;
+        esac
+
+        version="$INPUT_VERSION"
+        if [ -z "$version" ] && [[ "$ACTION_REF" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+          version="$ACTION_REF"
+        fi
+        if [ -z "$version" ]; then
+          version=$(curl -fsSL -H "Authorization: Bearer $GH_TOKEN" \
+            https://api.github.com/repos/robertasolimandonofreo/spot-readiness/releases/latest | jq -r .tag_name)
+        fi
+        [[ "$version" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "::error::invalid version '$version'"; exit 1; }
+
+        archive="spot-readiness_${version#v}_${os}_${arch}.tar.gz"
+        base="https://github.com/robertasolimandonofreo/spot-readiness/releases/download/${version}"
+        dir="$RUNNER_TEMP/spot-readiness"
+        mkdir -p "$dir"
+        curl -fsSL -o "$dir/$archive" "$base/$archive"
+        curl -fsSL -o "$dir/checksums.txt" "$base/checksums.txt"
+        (cd "$dir" && grep " $archive\$" checksums.txt | { sha256sum -c - 2>/dev/null || shasum -a 256 -c -; })
+        tar -xzf "$dir/$archive" -C "$dir" spot-readiness
+        echo "$dir" >> "$GITHUB_PATH"
+        echo "Installed spot-readiness $version"
+
+    - name: Scan
+      id: scan
+      shell: bash
+      env:
+        INPUT_PATH: ${{ inputs.path }}
+        INPUT_FAIL_ON: ${{ inputs.fail-on }}
+        INPUT_INCLUDE_SYSTEM: ${{ inputs.include-system }}
+      run: |
+        set -uo pipefail
+        flags=()
+        [ "$INPUT_INCLUDE_SYSTEM" = "true" ] && flags+=(--include-system)
+        # Word splitting of the path input is intended: it is a space-separated list.
+        # shellcheck disable=SC2086
+        spot-readiness scan ${flags[@]+"${flags[@]}"} -f markdown $INPUT_PATH > "$RUNNER_TEMP/spot-readiness-report.md"
+        status=$?
+        if [ $status -ne 0 ]; then cat "$RUNNER_TEMP/spot-readiness-report.md"; exit $status; fi
+        # shellcheck disable=SC2086
+        spot-readiness scan ${flags[@]+"${flags[@]}"} -f json $INPUT_PATH > "$RUNNER_TEMP/spot-readiness.json"
+
+        {
+          echo "potential-percent=$(jq .summary.spotPotentialPercent "$RUNNER_TEMP/spot-readiness.json")"
+          echo "ready=$(jq .summary.ready "$RUNNER_TEMP/spot-readiness.json")"
+          echo "caveats=$(jq .summary.readyWithCaveats "$RUNNER_TEMP/spot-readiness.json")"
+          echo "not-ready=$(jq .summary.notReady "$RUNNER_TEMP/spot-readiness.json")"
+        } >> "$GITHUB_OUTPUT"
+        cat "$RUNNER_TEMP/spot-readiness-report.md" >> "$GITHUB_STEP_SUMMARY"
+
+    - name: Comment on the pull request
+      if: inputs.comment == 'true' && github.event_name == 'pull_request'
+      shell: bash
+      env:
+        GH_TOKEN: ${{ inputs.github-token }}
+        PR_NUMBER: ${{ github.event.pull_request.number }}
+        GH_REPO: ${{ github.repository }}
+      run: |
+        gh pr comment "$PR_NUMBER" --body-file "$RUNNER_TEMP/spot-readiness-report.md" --edit-last --create-if-none
+
+    - name: Apply fail-on
+      if: inputs.fail-on != ''
+      shell: bash
+      env:
+        INPUT_FAIL_ON: ${{ inputs.fail-on }}
+        NOT_READY: ${{ steps.scan.outputs.not-ready }}
+        CAVEATS: ${{ steps.scan.outputs.caveats }}
+      run: |
+        case "$INPUT_FAIL_ON" in
+          not-ready) [ "${NOT_READY:-0}" -gt 0 ] && { echo "::error::${NOT_READY} workload(s) are not ready for Spot"; exit 1; } ;;
+          caveats) [ $(( ${NOT_READY:-0} + ${CAVEATS:-0} )) -gt 0 ] && { echo "::error::workload(s) are not ready, or have caveats, for Spot"; exit 1; } ;;
+          *) echo "::error::fail-on must be 'not-ready' or 'caveats', got '$INPUT_FAIL_ON'"; exit 1 ;;
+        esac
+        exit 0
