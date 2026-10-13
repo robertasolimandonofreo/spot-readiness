@@ -70,7 +70,7 @@ type sarifPhysical struct {
 
 type sarifArtifact struct {
 	URI       string `json:"uri"`
-	URIBaseID string `json:"uriBaseId"`
+	URIBaseID string `json:"uriBaseId,omitempty"`
 }
 
 type sarifRegion struct {
@@ -80,6 +80,18 @@ type sarifRegion struct {
 type sarifLogical struct {
 	FullyQualifiedName string `json:"fullyQualifiedName"`
 	Kind               string `json:"kind"`
+}
+
+// artifact is the location of a file: a path inside the directory of the scan is relative to the
+// repository root, and a path outside it (the scan was run on another directory) is a file URI.
+func artifact(file string) sarifArtifact {
+	if strings.HasPrefix(file, "/") {
+		return sarifArtifact{URI: "file://" + file}
+	}
+	if len(file) > 1 && file[1] == ':' { // a Windows drive, such as C:/repo/k8s
+		return sarifArtifact{URI: "file:///" + file}
+	}
+	return sarifArtifact{URI: file, URIBaseID: "%SRCROOT%"}
 }
 
 // sarifLevel maps the severities to SARIF levels: blockers are errors, caveats warnings and infos notes.
@@ -117,10 +129,7 @@ func SARIF(w io.Writer, r Report, version string) error {
 				if line < 1 {
 					line = 1
 				}
-				loc.PhysicalLocation = &sarifPhysical{
-					ArtifactLocation: sarifArtifact{URI: f.File, URIBaseID: "%SRCROOT%"},
-					Region:           sarifRegion{StartLine: line},
-				}
+				loc.PhysicalLocation = &sarifPhysical{ArtifactLocation: artifact(f.File), Region: sarifRegion{StartLine: line}}
 			}
 			// The fingerprint ignores the line, so an alert survives edits that move the manifest.
 			sum := sha256.Sum256([]byte(f.File + "|" + name + "|" + f.Rule))

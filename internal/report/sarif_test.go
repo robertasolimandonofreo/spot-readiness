@@ -74,3 +74,17 @@ func TestSARIF(t *testing.T) {
 		t.Fatal("different findings need different fingerprints")
 	}
 }
+
+func TestSARIFArtifactURI(t *testing.T) {
+	cases := map[string]sarifArtifact{
+		"k8s/api.yaml":           {URI: "k8s/api.yaml", URIBaseID: "%SRCROOT%"},
+		"/home/me/repo/api.yaml": {URI: "file:///home/me/repo/api.yaml"},
+		"C:/repo/k8s/api.yaml":   {URI: "file:///C:/repo/k8s/api.yaml"},
+		"../other/api.yaml":      {URI: "../other/api.yaml", URIBaseID: "%SRCROOT%"},
+	}
+	for file, want := range cases {
+		if got := artifact(file); got != want {
+			t.Errorf("artifact(%q) = %+v, want %+v", file, got, want)
+		}
+	}
+}
