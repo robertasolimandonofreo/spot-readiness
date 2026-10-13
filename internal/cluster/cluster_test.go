@@ -69,12 +69,18 @@ func TestLoadJobsAndCustomResources(t *testing.T) {
 	)
 	scheme := runtime.NewScheme()
 	dyn := dynamicfake.NewSimpleDynamicClientWithCustomListKinds(scheme,
-		map[schema.GroupVersionResource]string{rolloutGVR: "RolloutList", scaledObjectGVR: "ScaledObjectList"},
+		map[schema.GroupVersionResource]string{rolloutGVR: "RolloutList", scaledObjectGVR: "ScaledObjectList", scaledJobGVR: "ScaledJobList"},
 		&unstructured.Unstructured{Object: map[string]any{
 			"apiVersion": "argoproj.io/v1alpha1", "kind": "Rollout",
 			"metadata": map[string]any{"name": "web", "namespace": "shop"},
 			"spec": map[string]any{"replicas": int64(3), "template": map[string]any{
 				"spec": map[string]any{"containers": []any{map[string]any{"name": "web", "image": "x"}}}}},
+		}},
+		&unstructured.Unstructured{Object: map[string]any{
+			"apiVersion": "keda.sh/v1alpha1", "kind": "ScaledJob",
+			"metadata": map[string]any{"name": "consumer", "namespace": "jobs"},
+			"spec": map[string]any{"jobTargetRef": map[string]any{"backoffLimit": int64(0), "template": map[string]any{
+				"spec": map[string]any{"containers": []any{map[string]any{"name": "c", "image": "x"}}}}}},
 		}},
 		&unstructured.Unstructured{Object: map[string]any{
 			"apiVersion": "keda.sh/v1alpha1", "kind": "ScaledObject",
@@ -91,9 +97,9 @@ func TestLoadJobsAndCustomResources(t *testing.T) {
 	for _, w := range inv.Workloads {
 		kinds[w.Kind]++
 	}
-	// running Job, nightly CronJob and the Rollout; "done", the CronJob-owned Job and the
+	// running Job, nightly CronJob, the Rollout and the ScaledJob; "done", the CronJob-owned Job and the
 	// suspended CronJob are not workloads.
-	if kinds["Job"] != 1 || kinds["CronJob"] != 1 || kinds["Rollout"] != 1 || len(inv.Workloads) != 3 {
+	if kinds["Job"] != 1 || kinds["CronJob"] != 1 || kinds["Rollout"] != 1 || kinds["ScaledJob"] != 1 || len(inv.Workloads) != 4 {
 		t.Fatalf("workloads by kind: %v", kinds)
 	}
 	if inv.Skipped != 2 {

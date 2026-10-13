@@ -185,6 +185,22 @@ func addJSON(inv *rules.Inventory, doc []byte) error {
 			break
 		}
 		inv.Workloads = append(inv.Workloads, w)
+	case "ScaledJob":
+		if !strings.HasPrefix(meta.APIVersion, "keda.sh/") {
+			break
+		}
+		var o struct {
+			Metadata metav1.ObjectMeta   `json:"metadata"`
+			Spec     rules.ScaledJobSpec `json:"spec"`
+		}
+		if err := decode(&o); err != nil {
+			return err
+		}
+		if o.Metadata.Name == "" {
+			inv.Skipped++ // an unrendered template, not a real object
+			break
+		}
+		inv.Workloads = append(inv.Workloads, rules.FromScaledJob(o.Metadata.Namespace, o.Metadata.Name, o.Spec))
 	case "ScaledObject":
 		if !strings.HasPrefix(meta.APIVersion, "keda.sh/") {
 			break

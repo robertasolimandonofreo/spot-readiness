@@ -132,6 +132,20 @@ metadata: {name: other}
 spec: {}
 ---
 apiVersion: keda.sh/v1alpha1
+kind: ScaledJob
+metadata: {name: consumer, namespace: jobs}
+spec:
+  jobTargetRef:
+    backoffLimit: 0
+    parallelism: 3
+    template: {spec: {restartPolicy: Never, containers: [{name: c, image: x, resources: {requests: {cpu: 100m, memory: 64Mi}}}]}}
+---
+apiVersion: example.com/v1
+kind: ScaledJob
+metadata: {name: not-keda}
+spec: {}
+---
+apiVersion: keda.sh/v1alpha1
 kind: ScaledObject
 metadata: {name: api, namespace: shop}
 spec: {scaleTargetRef: {name: api}, minReplicaCount: 2}
@@ -143,7 +157,7 @@ spec: {scaleTargetRef: {name: api}, minReplicaCount: 2}
 	for _, w := range inv.Workloads {
 		names[w.Kind+"/"+w.Name] = w
 	}
-	if len(inv.Workloads) != 3 || names["CronJob/nightly"].Name == "" || names["Job/migrate"].Name == "" || names["Rollout/web"].Name == "" {
+	if len(inv.Workloads) != 4 || names["ScaledJob/consumer"].Name == "" || names["CronJob/nightly"].Name == "" || names["Job/migrate"].Name == "" || names["Rollout/web"].Name == "" {
 		t.Fatalf("workloads: %v", names)
 	}
 	if inv.Skipped != 2 { // the suspended CronJob and the Rollout with workloadRef
@@ -152,6 +166,10 @@ spec: {scaleTargetRef: {name: api}, minReplicaCount: 2}
 	cron := names["CronJob/nightly"]
 	if !cron.Batch || cron.Replicas != 2 || cron.BackoffLimit == nil || *cron.BackoffLimit != 0 {
 		t.Fatalf("cronjob: %+v", cron)
+	}
+	sj := names["ScaledJob/consumer"]
+	if !sj.Batch || sj.Replicas != 3 || sj.BackoffLimit == nil || *sj.BackoffLimit != 0 {
+		t.Fatalf("scaledjob: %+v", sj)
 	}
 	if !names["Job/migrate"].IgnoresDisruption {
 		t.Fatal("podFailurePolicy that ignores DisruptionTarget was not detected")

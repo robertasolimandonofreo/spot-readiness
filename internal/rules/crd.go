@@ -3,6 +3,7 @@ package rules
 import (
 	"encoding/json"
 
+	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
 )
 
@@ -45,4 +46,14 @@ func ScalerFromScaledObject(namespace string, spec ScaledObjectSpec) Scaler {
 		min = *spec.MinReplicaCount
 	}
 	return Scaler{Namespace: namespace, Kind: kind, Name: spec.ScaleTargetRef.Name, MinReplicas: min}
+}
+
+// ScaledJobSpec is the part of a KEDA "ScaledJob" that matters here: the Job it creates.
+type ScaledJobSpec struct {
+	JobTargetRef batchv1.JobSpec `json:"jobTargetRef"`
+}
+
+// FromScaledJob analyzes a ScaledJob like the Job it creates.
+func FromScaledJob(namespace, name string, spec ScaledJobSpec) Workload {
+	return jobWorkload("ScaledJob", namespace, name, spec.JobTargetRef)
 }

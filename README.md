@@ -3,8 +3,8 @@
 Tells you which Kubernetes workloads can run on Spot capacity, and what to fix in the ones that cannot.
 
 "Use Spot for interruption-tolerant workloads" is common advice. Finding out which workloads those
-are is usually a guess. `spot-readiness` reads your Deployments, StatefulSets, Argo Rollouts, Jobs, CronJobs and Pods and
-checks the things that decide whether an interruption is a non-event or an outage.
+are is usually a guess. `spot-readiness` reads your Deployments, StatefulSets, Argo Rollouts, Jobs, CronJobs, KEDA ScaledJobs
+and Pods and checks the things that decide whether an interruption is a non-event or an outage.
 
 > **Status: early.** It scans YAML/JSON manifests, or reads a live cluster (read-only). It is a static
 > analysis of configuration, not a guarantee: see [Limits](#limits).
@@ -60,8 +60,8 @@ spot-readiness scan --kubeconfig ./kc.yaml -f csv
 
 The minimum RBAC is `list` on `deployments`, `statefulsets`, `daemonsets` (apps), `pods` (core),
 `jobs` and `cronjobs` (batch), `poddisruptionbudgets` (policy) and `horizontalpodautoscalers`
-(autoscaling). Argo Rollouts (`rollouts`) and KEDA (`scaledobjects`) are read too when those CRDs
-exist. Everything except Deployments, StatefulSets and Pods is optional: a missing permission or
+(autoscaling). Argo Rollouts (`rollouts`) and KEDA (`scaledobjects`, `scaledjobs`) are read too when
+those CRDs exist. Everything except Deployments, StatefulSets and Pods is optional: a missing permission or
 CRD only means that part is not analyzed. The tool never creates, changes or deletes anything and sends nothing outside your machine.
 
 Example output:
@@ -131,11 +131,11 @@ least 50 points.
 | SR013 | info | Progress is lost on interruption unless the job checkpoints (cannot be verified) |
 
 SR001, SR004, SR005, SR006 and SR009 apply to long-running workloads (Deployments, StatefulSets,
-Argo Rollouts and bare Pods). SR010 to SR013 apply to Jobs and CronJobs. SR002, SR003, SR007 and
+Argo Rollouts and bare Pods). SR010 to SR013 apply to Jobs, CronJobs and KEDA ScaledJobs. SR002, SR003, SR007 and
 SR008 apply to all of them.
 
 The "Spot potential" line is the share of requested CPU in long-running workloads that are ready or
-ready with caveats. Jobs and CronJobs are not counted: they request CPU only while they run, so
+ready with caveats. Jobs, CronJobs and ScaledJobs are not counted: they request CPU only while they run, so
 weighing them like always-on services would overstate their share. The link in the output opens the
 [Kubernetes savings calculator](https://www.robertasoliman.com/en/tools/kubernetes-savings-calculator)
 with that number filled in as the interruption-tolerant share.
@@ -163,7 +163,10 @@ with that number filled in as the interruption-tolerant share.
 ## Roadmap
 
 - GitHub Action and `kubectl` plugin (krew).
-- Later: ScaledJob (KEDA), Argo Rollouts that use `workloadRef`, detecting checkpointing.
+- If asked: Argo Rollouts that use `workloadRef` (today the referenced Deployment is analyzed).
+
+Checking whether a Job checkpoints its progress is not on the roadmap: it is behavior of the
+application, and manifests do not show it.
 
 ## Development
 

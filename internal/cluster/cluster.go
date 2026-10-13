@@ -62,6 +62,7 @@ func Connect(opts Options) (Clients, string, error) {
 var (
 	rolloutGVR      = schema.GroupVersionResource{Group: "argoproj.io", Version: "v1alpha1", Resource: "rollouts"}
 	scaledObjectGVR = schema.GroupVersionResource{Group: "keda.sh", Version: "v1alpha1", Resource: "scaledobjects"}
+	scaledJobGVR    = schema.GroupVersionResource{Group: "keda.sh", Version: "v1alpha1", Resource: "scaledjobs"}
 )
 
 func jobFinished(j batchv1.Job) bool {
@@ -77,7 +78,7 @@ func jobFinished(j batchv1.Job) bool {
 }
 
 // Load lists Deployments, StatefulSets, Jobs, CronJobs, bare Pods, PodDisruptionBudgets and HPAs,
-// plus Argo Rollouts and KEDA ScaledObjects when those CRDs exist. DaemonSets are counted as
+// plus Argo Rollouts and KEDA ScaledObjects and ScaledJobs when those CRDs exist. DaemonSets are counted as
 // skipped, like in file mode.
 func Load(ctx context.Context, c Clients, namespace string) (*rules.Inventory, error) {
 	client := c.Kube
@@ -163,6 +164,17 @@ func Load(ctx context.Context, c Clients, namespace string) (*rules.Inventory, e
 				} else {
 					inv.Skipped++
 				}
+			}
+		}
+		if l, err := c.Dynamic.Resource(scaledJobGVR).Namespace(ns).List(ctx, opts); err == nil {
+			for _, u := range l.Items {
+				var o struct {
+					Spec rules.ScaledJobSpec `json:"spec"`
+				}
+				if runtime.DefaultUnstructuredConverter.FromUnstructured(u.Object, &o) != nil {
+					continue
+				}
+				inv.Workloads = append(inv.Workloads, rules.FromScaledJob(u.GetNamespace(), u.GetName(), o.Spec))
 			}
 		}
 		if l, err := c.Dynamic.Resource(scaledObjectGVR).Namespace(ns).List(ctx, opts); err == nil {

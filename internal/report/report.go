@@ -121,7 +121,7 @@ func Markdown(w io.Writer, r Report) {
 	}
 	fmt.Fprintln(w, ".")
 	if s.CPUMilli > 0 {
-		fmt.Fprintf(w, "\nSpot potential: **%d%%** of requested CPU is in long-running workloads that are ready or ready with caveats (Jobs and CronJobs are not counted). [Estimate the savings](%s).\n", s.PotentialPercent, s.CalculatorURL)
+		fmt.Fprintf(w, "\nSpot potential: **%d%%** of requested CPU is in long-running workloads that are ready or ready with caveats (Jobs, CronJobs and ScaledJobs are not counted). [Estimate the savings](%s).\n", s.PotentialPercent, s.CalculatorURL)
 	}
 
 	var attention []rules.Result
@@ -196,7 +196,7 @@ func Table(w io.Writer, r Report, verbose bool) {
 	}
 	fmt.Fprintln(w)
 	if s.CPUMilli > 0 {
-		fmt.Fprintf(w, "Spot potential: %d%% of requested CPU in long-running workloads (ready or with caveats; Jobs and CronJobs excluded).\n", s.PotentialPercent)
+		fmt.Fprintf(w, "Spot potential: %d%% of requested CPU in long-running workloads (ready or with caveats; Jobs, CronJobs and ScaledJobs excluded).\n", s.PotentialPercent)
 		fmt.Fprintf(w, "Estimate the savings: %s\n", s.CalculatorURL)
 	}
 	fmt.Fprintln(w, "Ready does not mean safe: this tool only sees configuration, not how your application behaves.")
