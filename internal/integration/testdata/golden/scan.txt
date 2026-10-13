@@ -1,0 +1,78 @@
+VERDICT             SCORE  CONFIDENCE  WORKLOAD                        REPLICAS  CPU   SPOT  FINDINGS
+not-ready           0      low         shop/deployment/legacy          2         100m  -     SR002,SR004,SR005,SR006,SR009
+not-ready           15     low         shop/statefulset/cache          1         50m   -     SR001,SR006,SR007,SR009
+not-ready           15     low         shop/deployment/db              1         50m   -     SR001,SR006,SR007,SR009
+not-ready           35     high        shop/deployment/worker          3         150m  -     SR003,SR004,SR005,SR006,SR009
+not-ready           40     medium      shop/job/import                 1         50m   -     SR010,SR012,SR013
+ready-with-caveats  85     high        karpenter/deployment/karpenter  2         100m  -     SR005
+ready               90     medium      shop/scaledjob/consumer         1         50m   -     SR012,SR013
+ready               90     medium      shop/cronjob/nightly            1         50m   -     SR012,SR013
+ready               100    high        shop/deployment/web             3         300m  -     
+
+RUNTIME RISK (where the pods run now; well spread workloads are not listed)
+
+shop/deployment/legacy
+  Pods: 2 on 1 node, 1 zone, 2 on Spot. Blast radius of one node: 100%
+  ⚠ All 2 pods run on one node (spot-readiness-it-control-plane): losing it takes the whole workload down.
+  ⚠ 2 pods run on Spot nodes that are all m5.large: one capacity shortage in that pool interrupts them together.
+  Runtime resilience: LOW
+  Manifest readiness: 0
+
+shop/statefulset/cache
+  Pods: 1 on 1 node, 1 zone, 1 on Spot. Blast radius of one node: 100%
+  ⚠ Only 1 pod is running: losing its node means downtime.
+  Runtime resilience: LOW
+  Manifest readiness: 15
+
+shop/deployment/db
+  Pods: 1 on 1 node, 1 zone, 1 on Spot. Blast radius of one node: 100%
+  ⚠ Only 1 pod is running: losing its node means downtime.
+  Runtime resilience: LOW
+  Manifest readiness: 15
+
+shop/deployment/worker
+  Pods: 2 on 1 node, 1 zone, 2 on Spot. Blast radius of one node: 100%
+  ⚠ All 2 pods run on one node (spot-readiness-it-control-plane): losing it takes the whole workload down.
+  ⚠ 2 pods run on Spot nodes that are all m5.large: one capacity shortage in that pool interrupts them together.
+  Runtime resilience: LOW
+  Manifest readiness: 35
+
+karpenter/deployment/karpenter
+  Pods: 2 on 1 node, 1 zone, 2 on Spot. Blast radius of one node: 100%
+  ⚠ All 2 pods run on one node (spot-readiness-it-control-plane): losing it takes the whole workload down.
+  ⚠ 2 pods run on Spot nodes that are all m5.large: one capacity shortage in that pool interrupts them together.
+  Runtime resilience: LOW
+  Manifest readiness: 85
+
+shop/deployment/web
+  Pods: 3 on 1 node, 1 zone, 3 on Spot. Blast radius of one node: 100%
+  ⚠ All 3 pods run on one node (spot-readiness-it-control-plane): losing it takes the whole workload down.
+  ⚠ 3 pods run on Spot nodes that are all m5.large: one capacity shortage in that pool interrupts them together.
+  Runtime resilience: LOW
+  Manifest readiness: 100
+
+KARPENTER NODEPOOLS
+
+NODEPOOL   CAPACITY        AZS  FAMILIES  TYPES  NODES  SCORE  FINDINGS
+general    on-demand,spot  any  any       any    0      100    
+spot-pool  spot            1    2         4      1      45     KR001,KR002,KR003,KR005,KR007
+
+TYPES and FAMILIES count what the NodePool lists; "any" means it does not limit them (or the limit cannot be seen).
+
+INTERRUPTION HANDLING
+
+Karpenter detected             ✓
+Interruption queue configured  ✓
+Spot nodes detected            ✓ (1 node)
+Node Termination Handler       -
+PDB issues                     3
+Workloads >120s termination    1
+  note: 3 workload(s) have no PodDisruptionBudget or one that blocks every eviction (SR005, SR014)
+  note: 1 workload(s) need more than 120s to terminate, so they are cut off by the Spot notice (SR003)
+
+Cluster interruption readiness: 81/100
+
+9 workloads: 3 ready, 1 with caveats, 5 not ready (4 skipped)
+Spot potential: 53% of requested CPU in long-running workloads (ready or with caveats; Jobs, CronJobs and ScaledJobs excluded).
+Estimate the savings: https://www.robertasoliman.com/en/tools/kubernetes-savings-calculator?tolerant=53
+Ready does not mean safe: this tool only sees configuration, not how your application behaves.

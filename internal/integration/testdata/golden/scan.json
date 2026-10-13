@@ -1,0 +1,592 @@
+{
+  "schemaVersion": "1",
+  "toolVersion": "v9.9.9",
+  "summary": {
+    "workloads": 9,
+    "batch": 3,
+    "ready": 3,
+    "readyWithCaveats": 1,
+    "notReady": 5,
+    "skipped": 4,
+    "averageScore": 52,
+    "cpuRequestMillis": 750,
+    "spotPotentialCpuMillis": 400,
+    "spotPotentialPercent": 53,
+    "calculatorUrl": "https://www.robertasoliman.com/en/tools/kubernetes-savings-calculator?tolerant=53"
+  },
+  "results": [
+    {
+      "kind": "Deployment",
+      "namespace": "shop",
+      "name": "legacy",
+      "replicas": 2,
+      "batch": false,
+      "cpuRequestMillis": 100,
+      "alreadyOnSpot": false,
+      "score": 0,
+      "verdict": "not-ready",
+      "findings": [
+        {
+          "rule": "SR002",
+          "severity": "blocker",
+          "message": "hostPath volume \"scratch\": its data is lost with the node",
+          "remediation": "Use emptyDir for scratch data, or a PersistentVolumeClaim for data that must outlive the node.\n\n# spec.template.spec.volumes\n- name: scratch\n  emptyDir: {}",
+          "docsUrl": "https://kubernetes.io/docs/concepts/storage/volumes/"
+        },
+        {
+          "rule": "SR004",
+          "severity": "caveat",
+          "message": "no topology spread or pod anti-affinity: replicas can land on the same node or zone",
+          "remediation": "Spread the replicas across zones and nodes.\n\n# spec.template.spec\ntopologySpreadConstraints:\n  - maxSkew: 1\n    topologyKey: topology.kubernetes.io/zone\n    whenUnsatisfiable: ScheduleAnyway\n    labelSelector:\n      matchLabels:\n        app: legacy\n  - maxSkew: 1\n    topologyKey: kubernetes.io/hostname\n    whenUnsatisfiable: ScheduleAnyway\n    labelSelector:\n      matchLabels:\n        app: legacy",
+          "docsUrl": "https://kubernetes.io/docs/concepts/scheduling-eviction/topology-spread-constraints/"
+        },
+        {
+          "rule": "SR005",
+          "severity": "caveat",
+          "message": "no PodDisruptionBudget: draining can remove too many replicas at once",
+          "remediation": "Add a PodDisruptionBudget so a drain removes one replica at a time.\n\napiVersion: policy/v1\nkind: PodDisruptionBudget\nmetadata:\n  name: legacy\n  namespace: shop\nspec:\n  maxUnavailable: 1\n  unhealthyPodEvictionPolicy: AlwaysAllow\n  selector:\n    matchLabels:\n      app: legacy",
+          "docsUrl": "https://kubernetes.io/docs/tasks/run-application/configure-pdb/"
+        },
+        {
+          "rule": "SR006",
+          "severity": "caveat",
+          "message": "container \"legacy\" has no readinessProbe: traffic can reach a pod that is not ready",
+          "remediation": "Add a readinessProbe so traffic only reaches pods that can serve it. Point it at your health endpoint.\n\n# spec.template.spec.containers[legacy]\nreadinessProbe:\n  httpGet:\n    path: /healthz\n    port: 8080\n  periodSeconds: 5\n  failureThreshold: 3",
+          "docsUrl": "https://kubernetes.io/docs/tasks/configure-pod-container/configure-liveness-readiness-startup-probes/"
+        },
+        {
+          "rule": "SR009",
+          "severity": "info",
+          "message": "no preStop hook: in-flight requests may be cut when the node is reclaimed",
+          "remediation": "Add a short preStop sleep so the endpoint is removed from load balancers before the process gets SIGTERM.\n\n# spec.template.spec.containers[legacy]\nlifecycle:\n  preStop:\n    exec:\n      command: [\"sleep\", \"15\"]",
+          "docsUrl": "https://kubernetes.io/docs/concepts/containers/container-lifecycle-hooks/"
+        }
+      ],
+      "flexibility": {
+        "score": 100,
+        "zones": 0,
+        "families": [],
+        "constraints": "low"
+      },
+      "confidence": "low",
+      "confidenceReasons": [
+        "node-local data in a hostPath volume"
+      ],
+      "runtime": {
+        "pods": 2,
+        "nodes": [
+          {
+            "name": "spot-readiness-it-control-plane",
+            "zone": "us-east-1a",
+            "capacityType": "spot",
+            "instanceType": "m5.large",
+            "pods": 2
+          }
+        ],
+        "zones": 1,
+        "spotPods": 2,
+        "blastRadiusPercent": 100,
+        "resilience": "low",
+        "warnings": [
+          "All 2 pods run on one node (spot-readiness-it-control-plane): losing it takes the whole workload down.",
+          "2 pods run on Spot nodes that are all m5.large: one capacity shortage in that pool interrupts them together."
+        ]
+      }
+    },
+    {
+      "kind": "StatefulSet",
+      "namespace": "shop",
+      "name": "cache",
+      "replicas": 1,
+      "batch": false,
+      "cpuRequestMillis": 50,
+      "alreadyOnSpot": false,
+      "score": 15,
+      "verdict": "not-ready",
+      "findings": [
+        {
+          "rule": "SR001",
+          "severity": "blocker",
+          "message": "runs with 1 replica: an interruption means downtime",
+          "remediation": "Run at least 2 replicas (3 across zones is better), or give the HPA minReplicas: 2.\n\n# StatefulSet: spec\nreplicas: 2",
+          "docsUrl": "https://kubernetes.io/docs/concepts/workloads/controllers/deployment/"
+        },
+        {
+          "rule": "SR006",
+          "severity": "caveat",
+          "message": "container \"cache\" has no readinessProbe: traffic can reach a pod that is not ready",
+          "remediation": "Add a readinessProbe so traffic only reaches pods that can serve it. Point it at your health endpoint.\n\n# spec.template.spec.containers[cache]\nreadinessProbe:\n  httpGet:\n    path: /healthz\n    port: 8080\n  periodSeconds: 5\n  failureThreshold: 3",
+          "docsUrl": "https://kubernetes.io/docs/tasks/configure-pod-container/configure-liveness-readiness-startup-probes/"
+        },
+        {
+          "rule": "SR007",
+          "severity": "caveat",
+          "message": "uses persistent volumes: zonal disks make rescheduling slower and tied to one zone",
+          "remediation": "A zonal volume keeps the pod in one zone and slows rescheduling. Keep this workload on on-demand nodes, or accept slower recovery.\n\n# spec.template.spec\nnodeSelector:\n  karpenter.sh/capacity-type: on-demand",
+          "docsUrl": "https://kubernetes.io/docs/concepts/storage/persistent-volumes/"
+        },
+        {
+          "rule": "SR009",
+          "severity": "info",
+          "message": "no preStop hook: in-flight requests may be cut when the node is reclaimed",
+          "remediation": "Add a short preStop sleep so the endpoint is removed from load balancers before the process gets SIGTERM.\n\n# spec.template.spec.containers[cache]\nlifecycle:\n  preStop:\n    exec:\n      command: [\"sleep\", \"15\"]",
+          "docsUrl": "https://kubernetes.io/docs/concepts/containers/container-lifecycle-hooks/"
+        }
+      ],
+      "flexibility": {
+        "score": 100,
+        "zones": 0,
+        "families": [],
+        "constraints": "low"
+      },
+      "confidence": "low",
+      "confidenceReasons": [
+        "persistent state: the manifest does not show how the application replicates or recovers it",
+        "StatefulSet: pod identity and ordering matter, and the manifest does not show how much"
+      ],
+      "runtime": {
+        "pods": 1,
+        "nodes": [
+          {
+            "name": "spot-readiness-it-control-plane",
+            "zone": "us-east-1a",
+            "capacityType": "spot",
+            "instanceType": "m5.large",
+            "pods": 1
+          }
+        ],
+        "zones": 1,
+        "spotPods": 1,
+        "blastRadiusPercent": 100,
+        "resilience": "low",
+        "warnings": [
+          "Only 1 pod is running: losing its node means downtime."
+        ]
+      }
+    },
+    {
+      "kind": "Deployment",
+      "namespace": "shop",
+      "name": "db",
+      "replicas": 1,
+      "batch": false,
+      "cpuRequestMillis": 50,
+      "alreadyOnSpot": false,
+      "score": 15,
+      "verdict": "not-ready",
+      "findings": [
+        {
+          "rule": "SR001",
+          "severity": "blocker",
+          "message": "runs with 1 replica: an interruption means downtime",
+          "remediation": "Run at least 2 replicas (3 across zones is better), or give the HPA minReplicas: 2.\n\n# Deployment: spec\nreplicas: 2",
+          "docsUrl": "https://kubernetes.io/docs/concepts/workloads/controllers/deployment/"
+        },
+        {
+          "rule": "SR006",
+          "severity": "caveat",
+          "message": "container \"db\" has no readinessProbe: traffic can reach a pod that is not ready",
+          "remediation": "Add a readinessProbe so traffic only reaches pods that can serve it. Point it at your health endpoint.\n\n# spec.template.spec.containers[db]\nreadinessProbe:\n  httpGet:\n    path: /healthz\n    port: 8080\n  periodSeconds: 5\n  failureThreshold: 3",
+          "docsUrl": "https://kubernetes.io/docs/tasks/configure-pod-container/configure-liveness-readiness-startup-probes/"
+        },
+        {
+          "rule": "SR007",
+          "severity": "caveat",
+          "message": "uses persistent volumes: zonal disks make rescheduling slower and tied to one zone",
+          "remediation": "A zonal volume keeps the pod in one zone and slows rescheduling. Keep this workload on on-demand nodes, or accept slower recovery.\n\n# spec.template.spec\nnodeSelector:\n  karpenter.sh/capacity-type: on-demand",
+          "docsUrl": "https://kubernetes.io/docs/concepts/storage/persistent-volumes/"
+        },
+        {
+          "rule": "SR009",
+          "severity": "info",
+          "message": "no preStop hook: in-flight requests may be cut when the node is reclaimed",
+          "remediation": "Add a short preStop sleep so the endpoint is removed from load balancers before the process gets SIGTERM.\n\n# spec.template.spec.containers[db]\nlifecycle:\n  preStop:\n    exec:\n      command: [\"sleep\", \"15\"]",
+          "docsUrl": "https://kubernetes.io/docs/concepts/containers/container-lifecycle-hooks/"
+        }
+      ],
+      "flexibility": {
+        "score": 100,
+        "zones": 0,
+        "families": [],
+        "constraints": "low"
+      },
+      "confidence": "low",
+      "confidenceReasons": [
+        "persistent state: the manifest does not show how the application replicates or recovers it"
+      ],
+      "runtime": {
+        "pods": 1,
+        "nodes": [
+          {
+            "name": "spot-readiness-it-control-plane",
+            "zone": "us-east-1a",
+            "capacityType": "spot",
+            "instanceType": "m5.large",
+            "pods": 1
+          }
+        ],
+        "zones": 1,
+        "spotPods": 1,
+        "blastRadiusPercent": 100,
+        "resilience": "low",
+        "warnings": [
+          "Only 1 pod is running: losing its node means downtime."
+        ]
+      }
+    },
+    {
+      "kind": "Deployment",
+      "namespace": "shop",
+      "name": "worker",
+      "replicas": 3,
+      "batch": false,
+      "cpuRequestMillis": 150,
+      "alreadyOnSpot": false,
+      "score": 35,
+      "verdict": "not-ready",
+      "findings": [
+        {
+          "rule": "SR003",
+          "severity": "caveat",
+          "message": "terminationGracePeriodSeconds is 300s, but Spot gives only 120s of notice",
+          "remediation": "Make the application exit on SIGTERM within the 2-minute Spot notice and lower the grace period.\n\n# spec.template.spec\nterminationGracePeriodSeconds: 90",
+          "docsUrl": "https://kubernetes.io/docs/concepts/workloads/pods/pod-lifecycle/"
+        },
+        {
+          "rule": "SR004",
+          "severity": "caveat",
+          "message": "no topology spread or pod anti-affinity: replicas can land on the same node or zone",
+          "remediation": "Spread the replicas across zones and nodes.\n\n# spec.template.spec\ntopologySpreadConstraints:\n  - maxSkew: 1\n    topologyKey: topology.kubernetes.io/zone\n    whenUnsatisfiable: ScheduleAnyway\n    labelSelector:\n      matchLabels:\n        app: worker\n  - maxSkew: 1\n    topologyKey: kubernetes.io/hostname\n    whenUnsatisfiable: ScheduleAnyway\n    labelSelector:\n      matchLabels:\n        app: worker",
+          "docsUrl": "https://kubernetes.io/docs/concepts/scheduling-eviction/topology-spread-constraints/"
+        },
+        {
+          "rule": "SR005",
+          "severity": "caveat",
+          "message": "no PodDisruptionBudget: draining can remove too many replicas at once",
+          "remediation": "Add a PodDisruptionBudget so a drain removes one replica at a time.\n\napiVersion: policy/v1\nkind: PodDisruptionBudget\nmetadata:\n  name: worker\n  namespace: shop\nspec:\n  maxUnavailable: 1\n  unhealthyPodEvictionPolicy: AlwaysAllow\n  selector:\n    matchLabels:\n      app: worker",
+          "docsUrl": "https://kubernetes.io/docs/tasks/run-application/configure-pdb/"
+        },
+        {
+          "rule": "SR006",
+          "severity": "caveat",
+          "message": "container \"worker\" has no readinessProbe: traffic can reach a pod that is not ready",
+          "remediation": "Add a readinessProbe so traffic only reaches pods that can serve it. Point it at your health endpoint.\n\n# spec.template.spec.containers[worker]\nreadinessProbe:\n  httpGet:\n    path: /healthz\n    port: 8080\n  periodSeconds: 5\n  failureThreshold: 3",
+          "docsUrl": "https://kubernetes.io/docs/tasks/configure-pod-container/configure-liveness-readiness-startup-probes/"
+        },
+        {
+          "rule": "SR009",
+          "severity": "info",
+          "message": "no preStop hook: in-flight requests may be cut when the node is reclaimed",
+          "remediation": "Add a short preStop sleep so the endpoint is removed from load balancers before the process gets SIGTERM.\n\n# spec.template.spec.containers[worker]\nlifecycle:\n  preStop:\n    exec:\n      command: [\"sleep\", \"15\"]",
+          "docsUrl": "https://kubernetes.io/docs/concepts/containers/container-lifecycle-hooks/"
+        }
+      ],
+      "flexibility": {
+        "score": 100,
+        "zones": 0,
+        "families": [],
+        "constraints": "low"
+      },
+      "confidence": "high",
+      "confidenceReasons": [],
+      "runtime": {
+        "pods": 2,
+        "nodes": [
+          {
+            "name": "spot-readiness-it-control-plane",
+            "zone": "us-east-1a",
+            "capacityType": "spot",
+            "instanceType": "m5.large",
+            "pods": 2
+          }
+        ],
+        "zones": 1,
+        "spotPods": 2,
+        "blastRadiusPercent": 100,
+        "resilience": "low",
+        "warnings": [
+          "All 2 pods run on one node (spot-readiness-it-control-plane): losing it takes the whole workload down.",
+          "2 pods run on Spot nodes that are all m5.large: one capacity shortage in that pool interrupts them together."
+        ]
+      }
+    },
+    {
+      "kind": "Job",
+      "namespace": "shop",
+      "name": "import",
+      "replicas": 1,
+      "batch": true,
+      "cpuRequestMillis": 50,
+      "alreadyOnSpot": false,
+      "score": 40,
+      "verdict": "not-ready",
+      "findings": [
+        {
+          "rule": "SR010",
+          "severity": "blocker",
+          "message": "backoffLimit is 0: a single lost pod fails the whole job",
+          "remediation": "Let the job retry: with backoffLimit 0 one lost pod fails it.\n\n# spec\nbackoffLimit: 6",
+          "docsUrl": "https://kubernetes.io/docs/concepts/workloads/controllers/job/"
+        },
+        {
+          "rule": "SR012",
+          "severity": "info",
+          "message": "no podFailurePolicy that ignores DisruptionTarget: a pod lost to an interruption can count against backoffLimit",
+          "remediation": "Do not count pods lost to a node disruption against backoffLimit (needs restartPolicy: Never).\n\n# spec\npodFailurePolicy:\n  rules:\n    - action: Ignore\n      onPodConditions:\n        - type: DisruptionTarget",
+          "docsUrl": "https://kubernetes.io/docs/concepts/workloads/controllers/job/"
+        },
+        {
+          "rule": "SR013",
+          "severity": "info",
+          "message": "progress is lost on interruption unless the job checkpoints; the tool cannot verify that",
+          "remediation": "Write progress to durable storage (S3, a PVC) and resume from it when the job starts, so an interruption does not restart from zero.",
+          "docsUrl": "https://kubernetes.io/docs/concepts/workloads/controllers/job/"
+        }
+      ],
+      "flexibility": {
+        "score": 100,
+        "zones": 0,
+        "families": [],
+        "constraints": "low"
+      },
+      "confidence": "medium",
+      "confidenceReasons": [
+        "job: whether it checkpoints its progress cannot be verified"
+      ]
+    },
+    {
+      "kind": "Deployment",
+      "namespace": "karpenter",
+      "name": "karpenter",
+      "replicas": 2,
+      "batch": false,
+      "cpuRequestMillis": 100,
+      "alreadyOnSpot": false,
+      "score": 85,
+      "verdict": "ready-with-caveats",
+      "findings": [
+        {
+          "rule": "SR005",
+          "severity": "caveat",
+          "message": "no PodDisruptionBudget: draining can remove too many replicas at once",
+          "remediation": "Add a PodDisruptionBudget so a drain removes one replica at a time.\n\napiVersion: policy/v1\nkind: PodDisruptionBudget\nmetadata:\n  name: karpenter\n  namespace: karpenter\nspec:\n  maxUnavailable: 1\n  unhealthyPodEvictionPolicy: AlwaysAllow\n  selector:\n    matchLabels:\n      app: karpenter",
+          "docsUrl": "https://kubernetes.io/docs/tasks/run-application/configure-pdb/"
+        }
+      ],
+      "flexibility": {
+        "score": 100,
+        "zones": 0,
+        "families": [],
+        "constraints": "low"
+      },
+      "confidence": "high",
+      "confidenceReasons": [],
+      "runtime": {
+        "pods": 2,
+        "nodes": [
+          {
+            "name": "spot-readiness-it-control-plane",
+            "zone": "us-east-1a",
+            "capacityType": "spot",
+            "instanceType": "m5.large",
+            "pods": 2
+          }
+        ],
+        "zones": 1,
+        "spotPods": 2,
+        "blastRadiusPercent": 100,
+        "resilience": "low",
+        "warnings": [
+          "All 2 pods run on one node (spot-readiness-it-control-plane): losing it takes the whole workload down.",
+          "2 pods run on Spot nodes that are all m5.large: one capacity shortage in that pool interrupts them together."
+        ]
+      }
+    },
+    {
+      "kind": "ScaledJob",
+      "namespace": "shop",
+      "name": "consumer",
+      "replicas": 1,
+      "batch": true,
+      "cpuRequestMillis": 50,
+      "alreadyOnSpot": false,
+      "score": 90,
+      "verdict": "ready",
+      "findings": [
+        {
+          "rule": "SR012",
+          "severity": "info",
+          "message": "no podFailurePolicy that ignores DisruptionTarget: a pod lost to an interruption can count against backoffLimit",
+          "remediation": "Do not count pods lost to a node disruption against backoffLimit (needs restartPolicy: Never).\n\n# spec.jobTargetRef\npodFailurePolicy:\n  rules:\n    - action: Ignore\n      onPodConditions:\n        - type: DisruptionTarget",
+          "docsUrl": "https://kubernetes.io/docs/concepts/workloads/controllers/job/"
+        },
+        {
+          "rule": "SR013",
+          "severity": "info",
+          "message": "progress is lost on interruption unless the job checkpoints; the tool cannot verify that",
+          "remediation": "Write progress to durable storage (S3, a PVC) and resume from it when the job starts, so an interruption does not restart from zero.",
+          "docsUrl": "https://kubernetes.io/docs/concepts/workloads/controllers/job/"
+        }
+      ],
+      "flexibility": {
+        "score": 100,
+        "zones": 0,
+        "families": [],
+        "constraints": "low"
+      },
+      "confidence": "medium",
+      "confidenceReasons": [
+        "job: whether it checkpoints its progress cannot be verified"
+      ]
+    },
+    {
+      "kind": "CronJob",
+      "namespace": "shop",
+      "name": "nightly",
+      "replicas": 1,
+      "batch": true,
+      "cpuRequestMillis": 50,
+      "alreadyOnSpot": false,
+      "score": 90,
+      "verdict": "ready",
+      "findings": [
+        {
+          "rule": "SR012",
+          "severity": "info",
+          "message": "no podFailurePolicy that ignores DisruptionTarget: a pod lost to an interruption can count against backoffLimit",
+          "remediation": "Do not count pods lost to a node disruption against backoffLimit (needs restartPolicy: Never).\n\n# spec.jobTemplate.spec\npodFailurePolicy:\n  rules:\n    - action: Ignore\n      onPodConditions:\n        - type: DisruptionTarget",
+          "docsUrl": "https://kubernetes.io/docs/concepts/workloads/controllers/job/"
+        },
+        {
+          "rule": "SR013",
+          "severity": "info",
+          "message": "progress is lost on interruption unless the job checkpoints; the tool cannot verify that",
+          "remediation": "Write progress to durable storage (S3, a PVC) and resume from it when the job starts, so an interruption does not restart from zero.",
+          "docsUrl": "https://kubernetes.io/docs/concepts/workloads/controllers/job/"
+        }
+      ],
+      "flexibility": {
+        "score": 100,
+        "zones": 0,
+        "families": [],
+        "constraints": "low"
+      },
+      "confidence": "medium",
+      "confidenceReasons": [
+        "job: whether it checkpoints its progress cannot be verified"
+      ]
+    },
+    {
+      "kind": "Deployment",
+      "namespace": "shop",
+      "name": "web",
+      "replicas": 3,
+      "batch": false,
+      "cpuRequestMillis": 300,
+      "alreadyOnSpot": false,
+      "score": 100,
+      "verdict": "ready",
+      "findings": [],
+      "flexibility": {
+        "score": 100,
+        "zones": 0,
+        "families": [],
+        "constraints": "low"
+      },
+      "confidence": "high",
+      "confidenceReasons": [],
+      "runtime": {
+        "pods": 3,
+        "nodes": [
+          {
+            "name": "spot-readiness-it-control-plane",
+            "zone": "us-east-1a",
+            "capacityType": "spot",
+            "instanceType": "m5.large",
+            "pods": 3
+          }
+        ],
+        "zones": 1,
+        "spotPods": 3,
+        "blastRadiusPercent": 100,
+        "resilience": "low",
+        "warnings": [
+          "All 3 pods run on one node (spot-readiness-it-control-plane): losing it takes the whole workload down.",
+          "3 pods run on Spot nodes that are all m5.large: one capacity shortage in that pool interrupts them together."
+        ]
+      }
+    }
+  ],
+  "karpenter": [
+    {
+      "nodePool": "general",
+      "capacity": "on-demand,spot",
+      "zones": 0,
+      "instanceFamilies": 0,
+      "instanceTypes": 0,
+      "nodeClaims": 0,
+      "score": 100,
+      "findings": []
+    },
+    {
+      "nodePool": "spot-pool",
+      "capacity": "spot",
+      "zones": 1,
+      "instanceFamilies": 2,
+      "instanceTypes": 4,
+      "nodeClaims": 1,
+      "score": 45,
+      "findings": [
+        {
+          "rule": "KR001",
+          "severity": "caveat",
+          "message": "supports only one Availability Zone: that zone running out of Spot capacity leaves the pool without nodes",
+          "remediation": "Let the NodePool use every zone that has a subnet, or list at least two.\n\n# NodePool spec.template.spec.requirements\n- key: topology.kubernetes.io/zone\n  operator: In\n  values: [\"\u003czone-a\u003e\", \"\u003czone-b\u003e\", \"\u003czone-c\u003e\"]",
+          "docsUrl": "https://karpenter.sh/docs/concepts/nodepools/"
+        },
+        {
+          "rule": "KR002",
+          "severity": "caveat",
+          "message": "allows only 2 instance families (at least 3 recommended)",
+          "remediation": "Allow several instance categories and make Karpenter keep a minimum of families.\n\n# NodePool spec.template.spec.requirements\n- key: karpenter.k8s.aws/instance-category\n  operator: In\n  values: [\"c\", \"m\", \"r\"]\n- key: karpenter.k8s.aws/instance-family\n  operator: Exists\n  minValues: 5",
+          "docsUrl": "https://karpenter.sh/docs/concepts/nodepools/"
+        },
+        {
+          "rule": "KR003",
+          "severity": "caveat",
+          "message": "allows only 4 instance types (AWS recommends at least 10 for Spot)",
+          "remediation": "List more instance types, or better, constrain by category and generation and let Karpenter pick the types.\n\n# NodePool spec.template.spec.requirements\n- key: karpenter.k8s.aws/instance-category\n  operator: In\n  values: [\"c\", \"m\", \"r\"]\n- key: karpenter.k8s.aws/instance-generation\n  operator: Gt\n  values: [\"2\"]\n- key: node.kubernetes.io/instance-type\n  operator: Exists\n  minValues: 10",
+          "docsUrl": "https://karpenter.sh/docs/concepts/nodepools/"
+        },
+        {
+          "rule": "KR005",
+          "severity": "info",
+          "message": "no explicit disruption budget: Karpenter applies its default of 10% of nodes at a time",
+          "remediation": "Set a disruption budget that fits you. Remove a budget of 0 nodes that is always active, or limit it with a schedule.\n\n# NodePool spec.disruption\nbudgets:\n  - nodes: \"10%\"\n  - nodes: \"0\"          # block voluntary disruption only during business hours\n    schedule: \"0 9 * * mon-fri\"\n    duration: 8h",
+          "docsUrl": "https://karpenter.sh/docs/concepts/disruption/"
+        },
+        {
+          "rule": "KR007",
+          "severity": "info",
+          "message": "no minValues on instance type, family or category: nothing makes Karpenter keep a minimum of instance diversity",
+          "remediation": "Make Karpenter keep a minimum of instance diversity.\n\n# NodePool spec.template.spec.requirements\n- key: karpenter.k8s.aws/instance-family\n  operator: Exists\n  minValues: 5",
+          "docsUrl": "https://karpenter.sh/docs/concepts/nodepools/"
+        }
+      ]
+    }
+  ],
+  "interruption": {
+    "karpenterDetected": true,
+    "interruptionQueue": "yes",
+    "spotDetected": true,
+    "spotNodes": 1,
+    "nodeTerminationHandler": false,
+    "pdbIssues": 3,
+    "slowTerminationWorkloads": 1,
+    "score": 81,
+    "notes": [
+      "3 workload(s) have no PodDisruptionBudget or one that blocks every eviction (SR005, SR014)",
+      "1 workload(s) need more than 120s to terminate, so they are cut off by the Spot notice (SR003)"
+    ]
+  }
+}

@@ -1,0 +1,79 @@
+# Minimal CRDs for the custom resources the tool reads. They accept any fields, which is enough to
+# test how the tool reads a cluster without installing Karpenter, KEDA or Argo Rollouts.
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata: {name: nodepools.karpenter.sh}
+spec:
+  group: karpenter.sh
+  scope: Cluster
+  names: {plural: nodepools, singular: nodepool, kind: NodePool}
+  versions:
+    - name: v1
+      served: true
+      storage: true
+      schema: {openAPIV3Schema: {type: object, x-kubernetes-preserve-unknown-fields: true}}
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata: {name: nodeclaims.karpenter.sh}
+spec:
+  group: karpenter.sh
+  scope: Cluster
+  names: {plural: nodeclaims, singular: nodeclaim, kind: NodeClaim}
+  versions:
+    - name: v1
+      served: true
+      storage: true
+      schema: {openAPIV3Schema: {type: object, x-kubernetes-preserve-unknown-fields: true}}
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata: {name: ec2nodeclasses.karpenter.k8s.aws}
+spec:
+  group: karpenter.k8s.aws
+  scope: Cluster
+  names: {plural: ec2nodeclasses, singular: ec2nodeclass, kind: EC2NodeClass}
+  versions:
+    - name: v1
+      served: true
+      storage: true
+      schema: {openAPIV3Schema: {type: object, x-kubernetes-preserve-unknown-fields: true}}
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata: {name: scaledobjects.keda.sh}
+spec:
+  group: keda.sh
+  scope: Namespaced
+  names: {plural: scaledobjects, singular: scaledobject, kind: ScaledObject}
+  versions:
+    - name: v1alpha1
+      served: true
+      storage: true
+      schema: {openAPIV3Schema: {type: object, x-kubernetes-preserve-unknown-fields: true}}
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata: {name: scaledjobs.keda.sh}
+spec:
+  group: keda.sh
+  scope: Namespaced
+  names: {plural: scaledjobs, singular: scaledjob, kind: ScaledJob}
+  versions:
+    - name: v1alpha1
+      served: true
+      storage: true
+      schema: {openAPIV3Schema: {type: object, x-kubernetes-preserve-unknown-fields: true}}
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata: {name: rollouts.argoproj.io}
+spec:
+  group: argoproj.io
+  scope: Namespaced
+  names: {plural: rollouts, singular: rollout, kind: Rollout}
+  versions:
+    - name: v1alpha1
+      served: true
+      storage: true
+      schema: {openAPIV3Schema: {type: object, x-kubernetes-preserve-unknown-fields: true}}

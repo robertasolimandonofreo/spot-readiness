@@ -1,0 +1,3 @@
+version: 1
+exclude:
+  namespaces: [local-path-storage]

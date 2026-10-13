@@ -363,8 +363,8 @@ func runtimeRisk(w io.Writer, results []rules.Result, verbose bool) {
 	for _, res := range rows {
 		rt := res.Runtime
 		fmt.Fprintf(w, "\n%s/%s/%s\n", res.Namespace, strings.ToLower(res.Kind), res.Name)
-		fmt.Fprintf(w, "  Pods: %d on %d nodes, %d zones, %d on Spot. Blast radius of one node: %d%%\n",
-			rt.Pods, len(rt.Nodes), rt.Zones, rt.SpotPods, rt.BlastRadius)
+		fmt.Fprintf(w, "  Pods: %d on %s, %s, %d on Spot. Blast radius of one node: %d%%\n",
+			rt.Pods, count(len(rt.Nodes), "node"), count(rt.Zones, "zone"), rt.SpotPods, rt.BlastRadius)
 		if verbose {
 			tw := tabwriter.NewWriter(w, 0, 4, 2, ' ', 0)
 			fmt.Fprintln(tw, "  NODE\tAZ\tCAPACITY\tINSTANCE\tPODS")
@@ -451,7 +451,7 @@ func interruptionRows(a *interruption.Assessment) [][2]string {
 	queue := map[string]string{interruption.Yes: "✓", interruption.No: "-", interruption.Unknown: "? (controller not seen)", interruption.NA: "n/a"}[a.InterruptionQueue]
 	spot := tick(a.SpotDetected)
 	if a.SpotNodes > 0 {
-		spot = fmt.Sprintf("✓ (%d nodes)", a.SpotNodes)
+		spot = fmt.Sprintf("✓ (%s)", count(a.SpotNodes, "node"))
 	}
 	return [][2]string{
 		{"Karpenter detected", tick(a.KarpenterDetected)},
@@ -482,4 +482,12 @@ func interruptionHandling(w io.Writer, a *interruption.Assessment) {
 		return
 	}
 	fmt.Fprintf(w, "\nCluster interruption readiness: %d/100\n", *a.Score)
+}
+
+// count formats a number with its noun, in the plural unless it is 1.
+func count(n int, noun string) string {
+	if n == 1 {
+		return fmt.Sprintf("%d %s", n, noun)
+	}
+	return fmt.Sprintf("%d %ss", n, noun)
 }

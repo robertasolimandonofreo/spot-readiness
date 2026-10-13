@@ -1,0 +1,52 @@
+SPOT MIGRATION PLAN
+
+Total workloads:             9
+Ready now:                   3
+Ready after changes:         3
+Manual review:               2
+Keep on on-demand:           1
+
+Requested CPU:               0.8 vCPU
+Immediately movable to Spot: 0.3 vCPU (40%)
+Potential after changes:     0.6 vCPU (73%)
+Waiting for a review:        0.1 vCPU (not in the potential)
+(CPU of long-running workloads; Jobs and CronJobs are listed but not counted)
+
+Phase 0: prepare the platform
+  - NodePool spot-pool (KR001): supports only one Availability Zone: that zone running out of Spot capacity leaves the pool without nodes
+  - NodePool spot-pool (KR002): allows only 2 instance families (at least 3 recommended)
+  - NodePool spot-pool (KR003): allows only 4 instance types (AWS recommends at least 10 for Spot)
+
+Phase 1: move now (safest first)
+  shop/deployment/web  (0.3 vCPU, confidence high)
+  shop/scaledjob/consumer  (job, confidence medium)
+  shop/cronjob/nightly  (job, confidence medium)
+
+Phase 2: move after these changes (best return for the effort first)
+  1. karpenter/deployment/karpenter  (0.1 vCPU, 1 change, score 85, confidence high)
+       SR005  Add a PodDisruptionBudget so a drain removes one replica at a time.
+  2. shop/deployment/worker  (0.1 vCPU, 4 changes, score 35, confidence high)
+       SR003  Make the application exit on SIGTERM within the 2-minute Spot notice and lower the grace period.
+       SR004  Spread the replicas across zones and nodes.
+       SR005  Add a PodDisruptionBudget so a drain removes one replica at a time.
+       SR006  Add a readinessProbe so traffic only reaches pods that can serve it. Point it at your health endpoint.
+  3. shop/job/import  (job, 1 change, score 40, confidence medium)
+       SR010  Let the job retry: with backoffLimit 0 one lost pod fails it.
+
+Manual review
+  shop/statefulset/cache  (0.1 vCPU, confidence low)
+    Persistent state detected: uses persistent volumes: zonal disks make rescheduling slower and tied to one zone
+  shop/deployment/db  (0.1 vCPU, confidence low)
+    Persistent state detected: uses persistent volumes: zonal disks make rescheduling slower and tied to one zone; it runs a single replica, and a volume usually attaches to one pod
+
+  Before deciding, look at:
+    - storage topology (zonal disks, storage class, volume binding)
+    - replication and quorum: how many copies, and whether the rest keeps serving when one is lost
+    - recovery time: how long a replacement pod takes to be useful again
+    - availability zone dependency: whether the volume pins the pod to one zone
+
+Keep on on-demand
+  shop/deployment/legacy  (0.1 vCPU)
+    hostPath volume "scratch": its data is lost with the node
+
+The plan reads configuration only: test each move, start with a few replicas, and keep on-demand capacity as a fallback.

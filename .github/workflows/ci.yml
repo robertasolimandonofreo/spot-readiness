@@ -35,3 +35,22 @@ jobs:
           ./actionlint -color
       - name: shellcheck on the steps of action.yml
         run: go run ./.github/scripts/shellcheck-action
+
+  # The command against a real cluster (kind) and fixtures: the real API server, the custom resource
+  # definitions, the owner references of the pods and the labels of the node. The kind version and the
+  # node image are pinned, because the output includes the number of objects that the tool skipped.
+  integration:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - uses: helm/kind-action@v1
+        with:
+          version: v0.33.0
+          node_image: kindest/node:v1.37.0@sha256:a1ed56cfb0e7b93589bdf97c8cd566405a265939e3620fc4f5de89adff580ae5
+          cluster_name: spot-readiness-it
+      - run: go test -tags integration -count=1 ./internal/integration
+        env:
+          SPOT_READINESS_CONTEXT: kind-spot-readiness-it

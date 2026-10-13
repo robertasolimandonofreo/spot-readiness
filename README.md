@@ -573,7 +573,23 @@ go run ./cmd/spot-readiness scan testdata
 ```
 
 Rules live in `internal/rules/rules.go` as small functions and are covered by table tests. A new
-rule needs an ID, a severity, a check and a test case.
+rule needs an ID, a severity, a check, a test case, a remediation (`remediation.go`) and an
+explanation (`internal/explain`).
+
+The output of every format is compared with the golden files in `internal/app/testdata/golden`:
+after a deliberate change, `go test ./internal/app -update` rewrites them, and the diff is the review.
+
+`go test -race ./...` runs in CI, with `govulncheck`, `actionlint` and `shellcheck` on `action.yml`.
+The integration test runs the command against a real cluster, with fixtures that include Karpenter,
+KEDA and Argo Rollouts custom resources (minimal CRDs, no controllers):
+
+```bash
+kind create cluster --name spot-readiness-it
+SPOT_READINESS_CONTEXT=kind-spot-readiness-it go test -tags integration -count=1 ./internal/integration
+# after a deliberate change to the output: add -update, and read the diff
+```
+
+It applies objects, so it refuses to run against a context that is not named `kind-...`.
 
 ## License
 

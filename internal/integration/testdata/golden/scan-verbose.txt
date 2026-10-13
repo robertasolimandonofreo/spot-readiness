@@ -1,0 +1,92 @@
+VERDICT    SCORE  CONFIDENCE  WORKLOAD                 REPLICAS  CPU   SPOT  FINDINGS
+not-ready  0      low         shop/deployment/legacy   2         100m  -     SR002,SR004,SR005,SR006,SR009
+not-ready  15     low         shop/statefulset/cache   1         50m   -     SR001,SR006,SR007,SR009
+not-ready  15     low         shop/deployment/db       1         50m   -     SR001,SR006,SR007,SR009
+not-ready  35     high        shop/deployment/worker   3         150m  -     SR003,SR004,SR005,SR006,SR009
+not-ready  40     medium      shop/job/import          1         50m   -     SR010,SR012,SR013
+ready      90     medium      shop/scaledjob/consumer  1         50m   -     SR012,SR013
+ready      90     medium      shop/cronjob/nightly     1         50m   -     SR012,SR013
+ready      100    high        shop/deployment/web      3         300m  -     
+
+RUNTIME RISK (where the pods run now; well spread workloads are not listed)
+
+shop/deployment/legacy
+  Pods: 2 on 1 node, 1 zone, 2 on Spot. Blast radius of one node: 100%
+  NODE                             AZ          CAPACITY  INSTANCE  PODS
+  spot-readiness-it-control-plane  us-east-1a  spot      m5.large  2
+  ⚠ All 2 pods run on one node (spot-readiness-it-control-plane): losing it takes the whole workload down.
+  ⚠ 2 pods run on Spot nodes that are all m5.large: one capacity shortage in that pool interrupts them together.
+  Runtime resilience: LOW
+  Manifest readiness: 0
+
+shop/statefulset/cache
+  Pods: 1 on 1 node, 1 zone, 1 on Spot. Blast radius of one node: 100%
+  NODE                             AZ          CAPACITY  INSTANCE  PODS
+  spot-readiness-it-control-plane  us-east-1a  spot      m5.large  1
+  ⚠ Only 1 pod is running: losing its node means downtime.
+  Runtime resilience: LOW
+  Manifest readiness: 15
+
+shop/deployment/db
+  Pods: 1 on 1 node, 1 zone, 1 on Spot. Blast radius of one node: 100%
+  NODE                             AZ          CAPACITY  INSTANCE  PODS
+  spot-readiness-it-control-plane  us-east-1a  spot      m5.large  1
+  ⚠ Only 1 pod is running: losing its node means downtime.
+  Runtime resilience: LOW
+  Manifest readiness: 15
+
+shop/deployment/worker
+  Pods: 2 on 1 node, 1 zone, 2 on Spot. Blast radius of one node: 100%
+  NODE                             AZ          CAPACITY  INSTANCE  PODS
+  spot-readiness-it-control-plane  us-east-1a  spot      m5.large  2
+  ⚠ All 2 pods run on one node (spot-readiness-it-control-plane): losing it takes the whole workload down.
+  ⚠ 2 pods run on Spot nodes that are all m5.large: one capacity shortage in that pool interrupts them together.
+  Runtime resilience: LOW
+  Manifest readiness: 35
+
+shop/deployment/web
+  Pods: 3 on 1 node, 1 zone, 3 on Spot. Blast radius of one node: 100%
+  NODE                             AZ          CAPACITY  INSTANCE  PODS
+  spot-readiness-it-control-plane  us-east-1a  spot      m5.large  3
+  ⚠ All 3 pods run on one node (spot-readiness-it-control-plane): losing it takes the whole workload down.
+  ⚠ 3 pods run on Spot nodes that are all m5.large: one capacity shortage in that pool interrupts them together.
+  Runtime resilience: LOW
+  Manifest readiness: 100
+
+shop/deployment/legacy
+  SR002 [blocker] hostPath volume "scratch": its data is lost with the node
+  SR004 [caveat] no topology spread or pod anti-affinity: replicas can land on the same node or zone
+  SR005 [caveat] no PodDisruptionBudget: draining can remove too many replicas at once
+  SR006 [caveat] container "legacy" has no readinessProbe: traffic can reach a pod that is not ready
+  SR009 [info] no preStop hook: in-flight requests may be cut when the node is reclaimed
+shop/statefulset/cache
+  SR001 [blocker] runs with 1 replica: an interruption means downtime
+  SR006 [caveat] container "cache" has no readinessProbe: traffic can reach a pod that is not ready
+  SR007 [caveat] uses persistent volumes: zonal disks make rescheduling slower and tied to one zone
+  SR009 [info] no preStop hook: in-flight requests may be cut when the node is reclaimed
+shop/deployment/db
+  SR001 [blocker] runs with 1 replica: an interruption means downtime
+  SR006 [caveat] container "db" has no readinessProbe: traffic can reach a pod that is not ready
+  SR007 [caveat] uses persistent volumes: zonal disks make rescheduling slower and tied to one zone
+  SR009 [info] no preStop hook: in-flight requests may be cut when the node is reclaimed
+shop/deployment/worker
+  SR003 [caveat] terminationGracePeriodSeconds is 300s, but Spot gives only 120s of notice
+  SR004 [caveat] no topology spread or pod anti-affinity: replicas can land on the same node or zone
+  SR005 [caveat] no PodDisruptionBudget: draining can remove too many replicas at once
+  SR006 [caveat] container "worker" has no readinessProbe: traffic can reach a pod that is not ready
+  SR009 [info] no preStop hook: in-flight requests may be cut when the node is reclaimed
+shop/job/import
+  SR010 [blocker] backoffLimit is 0: a single lost pod fails the whole job
+  SR012 [info] no podFailurePolicy that ignores DisruptionTarget: a pod lost to an interruption can count against backoffLimit
+  SR013 [info] progress is lost on interruption unless the job checkpoints; the tool cannot verify that
+shop/scaledjob/consumer
+  SR012 [info] no podFailurePolicy that ignores DisruptionTarget: a pod lost to an interruption can count against backoffLimit
+  SR013 [info] progress is lost on interruption unless the job checkpoints; the tool cannot verify that
+shop/cronjob/nightly
+  SR012 [info] no podFailurePolicy that ignores DisruptionTarget: a pod lost to an interruption can count against backoffLimit
+  SR013 [info] progress is lost on interruption unless the job checkpoints; the tool cannot verify that
+
+8 workloads: 3 ready, 0 with caveats, 5 not ready
+Spot potential: 46% of requested CPU in long-running workloads (ready or with caveats; Jobs, CronJobs and ScaledJobs excluded).
+Estimate the savings: https://www.robertasoliman.com/en/tools/kubernetes-savings-calculator?tolerant=46
+Ready does not mean safe: this tool only sees configuration, not how your application behaves.
