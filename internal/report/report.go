@@ -11,6 +11,7 @@ import (
 	"strings"
 	"text/tabwriter"
 
+	"github.com/robertasolimandonofreo/spot-readiness/internal/karpenter"
 	"github.com/robertasolimandonofreo/spot-readiness/internal/rules"
 )
 
@@ -37,6 +38,8 @@ type Summary struct {
 type Report struct {
 	Summary Summary        `json:"summary"`
 	Results []rules.Result `json:"results"`
+	// Karpenter is the NodePool analysis, present only when it was asked for (scan --karpenter).
+	Karpenter []karpenter.Result `json:"karpenter,omitempty"`
 }
 
 func Build(results []rules.Result, skipped int) Report {
@@ -156,9 +159,23 @@ func Markdown(w io.Writer, r Report) {
 		}
 	}
 
+	if len(r.Karpenter) > 0 {
+		fmt.Fprint(w, "\n### Karpenter NodePools\n\n| NodePool | Capacity | AZs | Families | Types | Score | Findings |\n|---|---|---|---|---|---|---|\n")
+		for _, np := range r.Karpenter {
+			fmt.Fprintf(w, "| %s | %s | %s | %s | %s | %s | %s |\n", mdCell(np.NodePool), np.Capacity, anyOrCount(np.Zones),
+				anyOrCount(np.InstanceFamilies), anyOrCount(np.InstanceTypes), scoreOrDash(np.Score), findingIDs(np.Findings, ", "))
+		}
+	}
+
 	fmt.Fprint(w, "\n<details><summary>Rules</summary>\n\n")
 	for _, d := range rules.Descriptions {
 		fmt.Fprintf(w, "- **%s** (%s): %s\n", d.ID, d.Severity, d.Text)
+	}
+	if r.Karpenter != nil {
+		fmt.Fprintln(w)
+		for _, d := range karpenter.Rules {
+			fmt.Fprintf(w, "- **%s** (%s): %s\n", d.ID, d.Severity, d.Text)
+		}
 	}
 	fmt.Fprintln(w, "\n</details>")
 	fmt.Fprintln(w, "\n_Ready does not mean safe: this tool only sees configuration, not how your application behaves._")
@@ -183,6 +200,7 @@ func Table(w io.Writer, r Report, verbose bool) {
 
 	flexibility(w, r.Results)
 	runtimeRisk(w, r.Results, verbose)
+	nodePools(w, r.Karpenter, verbose)
 
 	if verbose {
 		fmt.Fprintln(w)
@@ -282,4 +300,54 @@ func dash(s string) string {
 		return "-"
 	}
 	return s
+}
+
+func anyOrCount(n int) string {
+	if n == 0 {
+		return "any"
+	}
+	return strconv.Itoa(n)
+}
+
+func scoreOrDash(s *int) string {
+	if s == nil {
+		return "-"
+	}
+	return strconv.Itoa(*s)
+}
+
+func findingIDs(fs []karpenter.Finding, sep string) string {
+	ids := make([]string, 0, len(fs))
+	for _, f := range fs {
+		ids = append(ids, f.Rule)
+	}
+	return strings.Join(ids, sep)
+}
+
+// nodePools prints the Karpenter analysis. Pools that cannot launch Spot nodes are listed without a
+// score. A nil list means the analysis was not asked for.
+func nodePools(w io.Writer, pools []karpenter.Result, verbose bool) {
+	if pools == nil {
+		return
+	}
+	fmt.Fprint(w, "\nKARPENTER NODEPOOLS\n\n")
+	if len(pools) == 0 {
+		fmt.Fprintln(w, "No NodePools found.")
+		return
+	}
+	tw := tabwriter.NewWriter(w, 0, 4, 2, ' ', 0)
+	fmt.Fprintln(tw, "NODEPOOL\tCAPACITY\tAZS\tFAMILIES\tTYPES\tNODES\tSCORE\tFINDINGS")
+	for _, np := range pools {
+		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\t%d\t%s\t%s\n", np.NodePool, np.Capacity, anyOrCount(np.Zones),
+			anyOrCount(np.InstanceFamilies), anyOrCount(np.InstanceTypes), np.NodeClaims, scoreOrDash(np.Score), findingIDs(np.Findings, ","))
+	}
+	tw.Flush()
+	if verbose {
+		for _, np := range pools {
+			for _, f := range np.Findings {
+				fmt.Fprintf(w, "  %s [%s] %s: %s\n", f.Rule, f.Severity, np.NodePool, f.Message)
+			}
+		}
+	}
+	fmt.Fprintln(w, "\nTYPES and FAMILIES count what the NodePool lists; \"any\" means it does not limit them (or the limit cannot be seen).")
 }

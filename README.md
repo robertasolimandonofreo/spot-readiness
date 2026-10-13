@@ -60,7 +60,7 @@ spot-readiness scan --kubeconfig ./kc.yaml -f csv
 
 The minimum RBAC is `list` on `deployments`, `statefulsets`, `daemonsets` (apps), `pods` (core),
 `jobs` and `cronjobs` (batch), `poddisruptionbudgets` (policy) and `horizontalpodautoscalers`
-(autoscaling). `nodes` (core) and `replicasets` (apps) are optional and enable the runtime risk view. Argo Rollouts (`rollouts`) and KEDA (`scaledobjects`, `scaledjobs`) are read too when
+(autoscaling). `nodes` (core) and `replicasets` (apps) are optional and enable the runtime risk view. `--karpenter` also needs `list` on `nodepools`, `nodeclaims` (karpenter.sh) and `ec2nodeclasses` (karpenter.k8s.aws). Argo Rollouts (`rollouts`) and KEDA (`scaledobjects`, `scaledjobs`) are read too when
 those CRDs exist. Everything except Deployments, StatefulSets and Pods is optional: a missing permission or
 CRD only means that part is not analyzed. The tool never creates, changes or deletes anything and sends nothing outside your machine.
 
@@ -167,6 +167,32 @@ least 50 points.
 SR001, SR004, SR005, SR006, SR009, SR014 and SR015 apply to long-running workloads (Deployments, StatefulSets,
 Argo Rollouts and bare Pods). SR010 to SR013 apply to Jobs, CronJobs and KEDA ScaledJobs. SR002, SR003, SR007, SR008 and
 SR016 to SR019 apply to all of them.
+
+### Karpenter NodePools (`--karpenter`)
+
+`scan --karpenter` also checks Karpenter NodePools: in cluster mode it reads `nodepools`,
+`nodeclaims` and `ec2nodeclasses` (karpenter.sh and karpenter.k8s.aws, `v1` or `v1beta1`); with paths it reads
+those kinds from the manifests. These rules use the `KR` prefix because they judge the platform that
+provides Spot nodes, not an application. They apply only to pools that may launch Spot (Karpenter
+launches on-demand nodes unless `karpenter.sh/capacity-type` says otherwise); other pools are listed
+without a score. Each pool starts at 100 and loses 15 per caveat and 5 per info.
+
+| Rule | Severity | Checks |
+|---|---|---|
+| KR001 | caveat | Only one Availability Zone, from the `topology.kubernetes.io/zone` requirement narrowed to the zones of the EC2NodeClass subnets (read from its status) |
+| KR002 | caveat | Fewer than 3 instance families, listed with `instance-family` or `instance-type` |
+| KR003 | caveat | Fewer than 10 instance types listed with `node.kubernetes.io/instance-type` |
+| KR004 | caveat | Four or more instance attributes pinned (category, family, generation, size, CPU, memory, architecture, type) |
+| KR005 | info or caveat | No explicit disruption budget (Karpenter then uses 10% of nodes), or an always-active budget of 0 nodes (caveat) |
+| KR006 | caveat | Only Spot is allowed and no other NodePool can launch on-demand nodes |
+| KR007 | info | No `minValues` on instance type, family or category |
+
+The table shows the zones, families and types the NodePool lists, and the nodes (NodeClaims) it runs
+now. Karpenter picks from the full EC2 catalog, so a pool that limits only by category or size shows
+`any`: this tool has no instance catalog, and `minValues` is what makes Karpenter enforce a minimum
+there. Spot interruptions ignore disruption budgets, which only rate-limit voluntary disruption. The
+analysis shows in the table, the JSON `karpenter` list and the Markdown report, and does not change
+`--fail-on`.
 
 ### Runtime risk (cluster mode)
 

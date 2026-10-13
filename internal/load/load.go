@@ -20,6 +20,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/yaml"
 
+	"github.com/robertasolimandonofreo/spot-readiness/internal/karpenter"
 	"github.com/robertasolimandonofreo/spot-readiness/internal/rules"
 )
 
@@ -213,6 +214,52 @@ func addJSON(inv *rules.Inventory, doc []byte) error {
 			return err
 		}
 		inv.Scalers = append(inv.Scalers, rules.ScalerFromScaledObject(o.Metadata.Namespace, o.Spec))
+	case "NodePool":
+		if !strings.HasPrefix(meta.APIVersion, "karpenter.sh/") {
+			break
+		}
+		var o struct {
+			Metadata metav1.ObjectMeta      `json:"metadata"`
+			Spec     karpenter.NodePoolSpec `json:"spec"`
+		}
+		if err := decode(&o); err != nil {
+			return err
+		}
+		if o.Metadata.Name != "" {
+			inv.Karpenter.NodePools = append(inv.Karpenter.NodePools, karpenter.NodePool{Name: o.Metadata.Name, Spec: o.Spec})
+		}
+	case "NodeClaim":
+		if !strings.HasPrefix(meta.APIVersion, "karpenter.sh/") {
+			break
+		}
+		var o struct {
+			Metadata metav1.ObjectMeta `json:"metadata"`
+		}
+		if err := decode(&o); err != nil {
+			return err
+		}
+		inv.Karpenter.NodeClaims = append(inv.Karpenter.NodeClaims,
+			karpenter.NodeClaim{Name: o.Metadata.Name, NodePool: o.Metadata.Labels["karpenter.sh/nodepool"]})
+	case "EC2NodeClass":
+		if !strings.HasPrefix(meta.APIVersion, "karpenter.k8s.aws/") {
+			break
+		}
+		var o struct {
+			Metadata metav1.ObjectMeta `json:"metadata"`
+			Status   struct {
+				Subnets []struct {
+					Zone string `json:"zone"`
+				} `json:"subnets"`
+			} `json:"status"`
+		}
+		if err := decode(&o); err != nil {
+			return err
+		}
+		c := karpenter.NodeClass{Name: o.Metadata.Name}
+		for _, sn := range o.Status.Subnets {
+			c.Zones = append(c.Zones, sn.Zone)
+		}
+		inv.Karpenter.NodeClasses = append(inv.Karpenter.NodeClasses, c)
 	case "DaemonSet", "ReplicaSet":
 		inv.Skipped++
 	}

@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/robertasolimandonofreo/spot-readiness/internal/cluster"
+	"github.com/robertasolimandonofreo/spot-readiness/internal/karpenter"
 	"github.com/robertasolimandonofreo/spot-readiness/internal/load"
 	"github.com/robertasolimandonofreo/spot-readiness/internal/report"
 	"github.com/robertasolimandonofreo/spot-readiness/internal/rules"
@@ -30,6 +31,7 @@ Flags for scan:
       --context string    kubeconfig context to read (cluster mode)
       --kubeconfig string kubeconfig file (cluster mode; default KUBECONFIG or ~/.kube/config)
   -n, --namespace string  only this namespace (cluster mode; default all)
+      --karpenter         also check Karpenter NodePools (KR rules; cluster mode reads them, file mode reads them from the paths)
       --fail-on string    exit 1 when a workload is "not-ready" or "caveats" (default: never)
 `
 
@@ -55,13 +57,14 @@ func main() {
 func scan(args []string) int {
 	fs := flag.NewFlagSet("scan", flag.ContinueOnError)
 	var format, failOn, kubeContext, kubeconfig, namespace string
-	var verbose, includeSystem bool
+	var verbose, includeSystem, withKarpenter bool
 	for _, name := range []string{"f", "format", "o", "output"} {
 		fs.StringVar(&format, name, "table", "output format: table, json, csv or markdown")
 	}
 	fs.BoolVar(&verbose, "v", false, "explain findings")
 	fs.BoolVar(&verbose, "verbose", false, "explain findings")
 	fs.BoolVar(&includeSystem, "include-system", false, "include system namespaces")
+	fs.BoolVar(&withKarpenter, "karpenter", false, "check Karpenter NodePools")
 	fs.StringVar(&failOn, "fail-on", "", "not-ready or caveats")
 	fs.StringVar(&kubeContext, "context", "", "kubeconfig context")
 	fs.StringVar(&kubeconfig, "kubeconfig", "", "kubeconfig file")
@@ -90,7 +93,7 @@ func scan(args []string) int {
 	var inv *rules.Inventory
 	var err error
 	if clusterMode {
-		inv, err = scanCluster(kubeconfig, kubeContext, namespace)
+		inv, err = scanCluster(kubeconfig, kubeContext, namespace, withKarpenter)
 	} else {
 		inv, err = load.Paths(fs.Args())
 	}
@@ -99,6 +102,12 @@ func scan(args []string) int {
 		return 2
 	}
 	rep := report.Build(rules.Analyze(inv, includeSystem), inv.Skipped)
+	if withKarpenter {
+		rep.Karpenter = karpenter.Analyze(&inv.Karpenter)
+		if rep.Karpenter == nil {
+			rep.Karpenter = []karpenter.Result{}
+		}
+	}
 	switch format {
 	case "json":
 		err = report.JSON(os.Stdout, rep)
@@ -121,7 +130,7 @@ func scan(args []string) int {
 	return 0
 }
 
-func scanCluster(kubeconfig, kubeContext, namespace string) (*rules.Inventory, error) {
+func scanCluster(kubeconfig, kubeContext, namespace string, withKarpenter bool) (*rules.Inventory, error) {
 	clients, name, err := cluster.Connect(cluster.Options{Kubeconfig: kubeconfig, Context: kubeContext, Namespace: namespace})
 	if err != nil {
 		return nil, err
@@ -129,5 +138,9 @@ func scanCluster(kubeconfig, kubeContext, namespace string) (*rules.Inventory, e
 	fmt.Fprintf(os.Stderr, "reading cluster %q (read-only)\n", name)
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 	defer cancel()
-	return cluster.Load(ctx, clients, namespace)
+	inv, err := cluster.Load(ctx, clients, namespace)
+	if err == nil && withKarpenter {
+		cluster.LoadKarpenter(ctx, clients, inv)
+	}
+	return inv, err
 }

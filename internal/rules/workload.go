@@ -2,6 +2,7 @@
 package rules
 
 import (
+	"github.com/robertasolimandonofreo/spot-readiness/internal/karpenter"
 	appsv1 "k8s.io/api/apps/v1"
 	autoscalingv2 "k8s.io/api/autoscaling/v2"
 	batchv1 "k8s.io/api/batch/v1"
@@ -48,6 +49,9 @@ type Inventory struct {
 	Scalers   []Scaler
 	// Skipped counts objects that were recognised but are out of scope (for example DaemonSets).
 	Skipped int
+
+	// Karpenter holds the NodePools, NodeClaims and EC2NodeClasses. They are only analyzed on request.
+	Karpenter karpenter.Inventory
 
 	// nodes and pods hold the runtime placement read from a cluster: see SetNodes and AddPod.
 	nodes map[string]Node

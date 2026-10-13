@@ -14,6 +14,7 @@ import (
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/tools/clientcmd"
 
+	"github.com/robertasolimandonofreo/spot-readiness/internal/karpenter"
 	"github.com/robertasolimandonofreo/spot-readiness/internal/rules"
 )
 
@@ -247,5 +248,72 @@ func placePods(ctx context.Context, client kubernetes.Interface, ns string, inv 
 			}
 		}
 		inv.AddPod(p.Namespace, kind, name, p.Spec.NodeName)
+	}
+}
+
+var (
+	nodePoolGroup  = "karpenter.sh"
+	nodeClassGroup = "karpenter.k8s.aws"
+)
+
+// listKarpenter lists a Karpenter custom resource, trying the current API version first and the
+// older one second. A missing CRD or permission yields nothing.
+func listKarpenter(ctx context.Context, d dynamic.Interface, group, resource string) []map[string]any {
+	for _, version := range []string{"v1", "v1beta1"} {
+		l, err := d.Resource(schema.GroupVersionResource{Group: group, Version: version, Resource: resource}).List(ctx, metav1.ListOptions{})
+		if err != nil {
+			continue
+		}
+		out := make([]map[string]any, 0, len(l.Items))
+		for _, u := range l.Items {
+			out = append(out, u.Object)
+		}
+		return out
+	}
+	return nil
+}
+
+// LoadKarpenter adds the NodePools, NodeClaims and EC2NodeClasses of the cluster to the inventory.
+// They are read only on request, so a cluster without Karpenter (or without permission to list it)
+// never sees the extra calls.
+func LoadKarpenter(ctx context.Context, c Clients, inv *rules.Inventory) {
+	if c.Dynamic == nil {
+		return
+	}
+	for _, o := range listKarpenter(ctx, c.Dynamic, nodePoolGroup, "nodepools") {
+		var np struct {
+			Metadata metav1.ObjectMeta      `json:"metadata"`
+			Spec     karpenter.NodePoolSpec `json:"spec"`
+		}
+		if runtime.DefaultUnstructuredConverter.FromUnstructured(o, &np) == nil && np.Metadata.Name != "" {
+			inv.Karpenter.NodePools = append(inv.Karpenter.NodePools, karpenter.NodePool{Name: np.Metadata.Name, Spec: np.Spec})
+		}
+	}
+	for _, o := range listKarpenter(ctx, c.Dynamic, nodePoolGroup, "nodeclaims") {
+		var nc struct {
+			Metadata metav1.ObjectMeta `json:"metadata"`
+		}
+		if runtime.DefaultUnstructuredConverter.FromUnstructured(o, &nc) == nil {
+			inv.Karpenter.NodeClaims = append(inv.Karpenter.NodeClaims,
+				karpenter.NodeClaim{Name: nc.Metadata.Name, NodePool: nc.Metadata.Labels["karpenter.sh/nodepool"]})
+		}
+	}
+	for _, o := range listKarpenter(ctx, c.Dynamic, nodeClassGroup, "ec2nodeclasses") {
+		var ec struct {
+			Metadata metav1.ObjectMeta `json:"metadata"`
+			Status   struct {
+				Subnets []struct {
+					Zone string `json:"zone"`
+				} `json:"subnets"`
+			} `json:"status"`
+		}
+		if runtime.DefaultUnstructuredConverter.FromUnstructured(o, &ec) != nil {
+			continue
+		}
+		class := karpenter.NodeClass{Name: ec.Metadata.Name}
+		for _, sn := range ec.Status.Subnets {
+			class.Zones = append(class.Zones, sn.Zone)
+		}
+		inv.Karpenter.NodeClasses = append(inv.Karpenter.NodeClasses, class)
 	}
 }

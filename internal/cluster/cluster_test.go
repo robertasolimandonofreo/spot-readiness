@@ -152,3 +152,41 @@ func TestLoadPlacesPodsOnNodes(t *testing.T) {
 		t.Fatalf("runtime: %+v", res)
 	}
 }
+
+func TestLoadKarpenter(t *testing.T) {
+	obj := func(group, version, kind, name string, extra map[string]any) *unstructured.Unstructured {
+		o := map[string]any{"apiVersion": group + "/" + version, "kind": kind, "metadata": map[string]any{"name": name}}
+		for k, v := range extra {
+			o[k] = v
+		}
+		return &unstructured.Unstructured{Object: o}
+	}
+	nodePool := obj("karpenter.sh", "v1", "NodePool", "spot", map[string]any{"spec": map[string]any{
+		"template":   map[string]any{"spec": map[string]any{"nodeClassRef": map[string]any{"name": "default"}}},
+		"disruption": map[string]any{"budgets": []any{map[string]any{"nodes": "10%"}}},
+	}})
+	claim := obj("karpenter.sh", "v1", "NodeClaim", "spot-1", nil)
+	claim.SetLabels(map[string]string{"karpenter.sh/nodepool": "spot"})
+	class := obj("karpenter.k8s.aws", "v1", "EC2NodeClass", "default", map[string]any{"status": map[string]any{
+		"subnets": []any{map[string]any{"id": "s-1", "zone": "us-east-1a"}}}})
+	dyn := dynamicfake.NewSimpleDynamicClientWithCustomListKinds(runtime.NewScheme(),
+		map[schema.GroupVersionResource]string{
+			{Group: "karpenter.sh", Version: "v1", Resource: "nodepools"}:           "NodePoolList",
+			{Group: "karpenter.sh", Version: "v1", Resource: "nodeclaims"}:          "NodeClaimList",
+			{Group: "karpenter.k8s.aws", Version: "v1", Resource: "ec2nodeclasses"}: "EC2NodeClassList",
+		}, nodePool, claim, class)
+
+	inv := &rules.Inventory{}
+	LoadKarpenter(context.Background(), Clients{Kube: fake.NewSimpleClientset(), Dynamic: dyn}, inv)
+	k := inv.Karpenter
+	if len(k.NodePools) != 1 || k.NodePools[0].Spec.Template.Spec.NodeClassRef.Name != "default" ||
+		len(k.NodeClaims) != 1 || k.NodeClaims[0].NodePool != "spot" || len(k.NodeClasses) != 1 || k.NodeClasses[0].Zones[0] != "us-east-1a" {
+		t.Fatalf("karpenter inventory: %+v", k)
+	}
+	// Without a dynamic client nothing is read.
+	empty := &rules.Inventory{}
+	LoadKarpenter(context.Background(), Clients{Kube: fake.NewSimpleClientset()}, empty)
+	if len(empty.Karpenter.NodePools) != 0 {
+		t.Fatal("no dynamic client: expected nothing")
+	}
+}

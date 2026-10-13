@@ -178,3 +178,48 @@ spec: {scaleTargetRef: {name: api}, minReplicaCount: 2}
 		t.Fatalf("scalers: %+v", inv.Scalers)
 	}
 }
+
+func TestKarpenterObjects(t *testing.T) {
+	inv := &rules.Inventory{}
+	doc := `
+apiVersion: karpenter.sh/v1
+kind: NodePool
+metadata: {name: spot}
+spec:
+  template:
+    spec:
+      nodeClassRef: {name: default}
+      requirements:
+        - {key: karpenter.sh/capacity-type, operator: In, values: [spot], minValues: 1}
+  disruption:
+    budgets: [{nodes: 0}, {nodes: "10%"}]
+---
+apiVersion: karpenter.sh/v1
+kind: NodeClaim
+metadata: {name: spot-abc, labels: {karpenter.sh/nodepool: spot}}
+---
+apiVersion: karpenter.k8s.aws/v1
+kind: EC2NodeClass
+metadata: {name: default}
+status:
+  subnets: [{id: s-1, zone: us-east-1a}, {id: s-2, zone: us-east-1b}]
+---
+apiVersion: example.com/v1
+kind: NodePool
+metadata: {name: not-karpenter}
+`
+	if err := Add(inv, []byte(doc)); err != nil {
+		t.Fatal(err)
+	}
+	k := inv.Karpenter
+	if len(k.NodePools) != 1 || len(k.NodeClaims) != 1 || k.NodeClaims[0].NodePool != "spot" ||
+		len(k.NodeClasses) != 1 || len(k.NodeClasses[0].Zones) != 2 {
+		t.Fatalf("karpenter inventory: %+v", k)
+	}
+	if b := k.NodePools[0].Spec.Disruption.Budgets; len(b) != 2 || b[0].Nodes.IntVal != 0 || b[1].Nodes.StrVal != "10%" {
+		t.Fatalf("budgets: %+v", b)
+	}
+	if len(inv.Workloads) != 0 {
+		t.Fatal("Karpenter objects are not workloads")
+	}
+}
