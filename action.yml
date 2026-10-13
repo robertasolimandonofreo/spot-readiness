@@ -21,6 +21,9 @@ inputs:
   fail-on-regression:
     description: Fail the job when the pull request adds a blocker or caveat finding that the base branch did not have. Existing findings never fail it, so a legacy project can adopt the check. The comment is still posted.
     default: "false"
+  sarif:
+    description: Also write a SARIF report to this file (for example spot-readiness.sarif), to upload to GitHub Code Scanning with github/codeql-action/upload-sarif. Findings then show on the manifest line. Needs the security-events write permission to upload.
+    default: ""
   include-system:
     description: Also analyze kube-system, kube-public and kube-node-lease.
     default: "false"
@@ -44,6 +47,9 @@ outputs:
   not-ready:
     description: Number of workloads that are not ready.
     value: ${{ steps.scan.outputs.not-ready }}
+  sarif-file:
+    description: Path of the SARIF report, when the sarif input is set.
+    value: ${{ steps.scan.outputs.sarif-file }}
   new-findings:
     description: Findings the pull request added compared with the base branch (empty outside pull requests).
     value: ${{ steps.scan.outputs.new-findings }}
@@ -102,6 +108,7 @@ runs:
         INPUT_INCLUDE_SYSTEM: ${{ inputs.include-system }}
         INPUT_CONFIG: ${{ inputs.config }}
         INPUT_FAIL_ON_REGRESSION: ${{ inputs.fail-on-regression }}
+        INPUT_SARIF: ${{ inputs.sarif }}
         EVENT_NAME: ${{ github.event_name }}
         BASE_SHA: ${{ github.event.pull_request.base.sha }}
       run: |
@@ -157,7 +164,13 @@ runs:
         # shellcheck disable=SC2086
         spot-readiness scan ${flags[@]+"${flags[@]}"} ${compare[@]+"${compare[@]}"} -f json $INPUT_PATH > "$RUNNER_TEMP/spot-readiness.json"
 
+        if [ -n "$INPUT_SARIF" ]; then
+          # shellcheck disable=SC2086
+          spot-readiness scan ${flags[@]+"${flags[@]}"} -f sarif $INPUT_PATH > "$INPUT_SARIF"
+        fi
+
         {
+          echo "sarif-file=$INPUT_SARIF"
           echo "potential-percent=$(jq .summary.spotPotentialPercent "$RUNNER_TEMP/spot-readiness.json")"
           echo "ready=$(jq .summary.ready "$RUNNER_TEMP/spot-readiness.json")"
           echo "caveats=$(jq .summary.readyWithCaveats "$RUNNER_TEMP/spot-readiness.json")"

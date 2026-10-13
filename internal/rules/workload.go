@@ -13,8 +13,48 @@ import (
 	"k8s.io/apimachinery/pkg/util/intstr"
 )
 
+// PodSpecPath is where the pod spec sits in a manifest of the kind, for example
+// "spec.template.spec" in a Deployment.
+func PodSpecPath(kind string) string {
+	switch kind {
+	case "Pod":
+		return "spec"
+	case "CronJob":
+		return "spec.jobTemplate.spec.template.spec"
+	case "ScaledJob":
+		return "spec.jobTargetRef.template.spec"
+	}
+	return "spec.template.spec"
+}
+
+// JobSpecPath is where the job spec sits in a Job, CronJob or ScaledJob manifest.
+func JobSpecPath(kind string) string {
+	switch kind {
+	case "CronJob":
+		return "spec.jobTemplate.spec"
+	case "ScaledJob":
+		return "spec.jobTargetRef"
+	}
+	return "spec"
+}
+
+// Locator maps a field of a workload's manifest to a line in its file. A path is "" (the object),
+// "pod.X" (X under the pod spec), "job.X" (X under the job spec), "containers[name]" under the pod
+// spec as "pod.containers[name]", or a literal path such as "spec.replicas". A path that does not
+// exist resolves to its deepest ancestor that does.
+type Locator interface {
+	Line(path string) int
+}
+
+// Source says where a workload was read from, when it came from a file.
+type Source struct {
+	File    string // path relative to the current directory, with forward slashes
+	Locator Locator
+}
+
 // Workload is the common view of a Deployment, StatefulSet, Argo Rollout, Job, CronJob or bare Pod.
 type Workload struct {
+	Source    Source
 	Kind      string
 	Namespace string
 	Name      string

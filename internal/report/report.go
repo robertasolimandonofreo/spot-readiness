@@ -236,7 +236,11 @@ func Table(w io.Writer, r Report, verbose bool) {
 			}
 			fmt.Fprintf(w, "%s/%s/%s\n", res.Namespace, strings.ToLower(res.Kind), res.Name)
 			for _, f := range res.Findings {
-				fmt.Fprintf(w, "  %s [%s] %s\n", f.Rule, f.Severity, f.Message)
+				where := ""
+				if f.File != "" {
+					where = fmt.Sprintf(" (%s:%d)", f.File, f.Line)
+				}
+				fmt.Fprintf(w, "  %s [%s] %s%s\n", f.Rule, f.Severity, f.Message, where)
 			}
 			for _, ig := range res.Ignored {
 				reason := ig.Reason

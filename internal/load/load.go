@@ -19,6 +19,7 @@ import (
 	policyv1 "k8s.io/api/policy/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/yaml"
+	goyaml "sigs.k8s.io/yaml/goyaml.v3"
 
 	"github.com/robertasolimandonofreo/spot-readiness/internal/karpenter"
 	"github.com/robertasolimandonofreo/spot-readiness/internal/rules"
@@ -56,7 +57,7 @@ func Paths(paths []string) (*rules.Inventory, error) {
 			if err != nil {
 				return err
 			}
-			if err := Add(inv, data); err != nil {
+			if err := addFile(inv, displayPath(path), data); err != nil {
 				return fmt.Errorf("%s: %w", path, err)
 			}
 			return nil
@@ -69,8 +70,22 @@ func Paths(paths []string) (*rules.Inventory, error) {
 }
 
 // Add parses a multi-document YAML (or JSON) stream into the inventory.
-func Add(inv *rules.Inventory, data []byte) error {
-	for _, doc := range docSeparator.Split(string(data), -1) {
+func Add(inv *rules.Inventory, data []byte) error { return addFile(inv, "", data) }
+
+// addFile is Add for a named file, so workloads remember where they came from.
+func addFile(inv *rules.Inventory, file string, data []byte) error {
+	text := string(data)
+	start := 0
+	docs := docSeparator.FindAllStringIndex(text, -1)
+	for i := 0; i <= len(docs); i++ {
+		end := len(text)
+		if i < len(docs) {
+			end = docs[i][0]
+		}
+		doc, offset := text[start:end], strings.Count(text[:start], "\n")
+		if i < len(docs) {
+			start = docs[i][1]
+		}
 		if strings.TrimSpace(doc) == "" {
 			continue
 		}
@@ -78,14 +93,19 @@ func Add(inv *rules.Inventory, data []byte) error {
 		if err != nil {
 			return err
 		}
-		if err := addJSON(inv, jsonDoc); err != nil {
+		src := source{file: file, offset: offset}
+		var root goyaml.Node
+		if goyaml.Unmarshal([]byte(doc), &root) == nil && len(root.Content) == 1 && root.Content[0].Kind == goyaml.MappingNode {
+			src.node = root.Content[0]
+		}
+		if err := addJSON(inv, jsonDoc, src); err != nil {
 			return err
 		}
 	}
 	return nil
 }
 
-func addJSON(inv *rules.Inventory, doc []byte) error {
+func addJSON(inv *rules.Inventory, doc []byte, src source) error {
 	var meta struct {
 		APIVersion string            `json:"apiVersion"`
 		Kind       string            `json:"kind"`
@@ -95,12 +115,34 @@ func addJSON(inv *rules.Inventory, doc []byte) error {
 		return err
 	}
 	decode := func(v any) error { return json.NewDecoder(bytes.NewReader(doc)).Decode(v) }
+	before := len(inv.Workloads)
+	defer func() {
+		// Workloads of a List were located by the recursive calls, against their own item.
+		if meta.Kind == "List" || src.node == nil {
+			for i := before; i < len(inv.Workloads); i++ {
+				inv.Workloads[i].Source.File = src.file
+			}
+			return
+		}
+		for i := before; i < len(inv.Workloads); i++ {
+			inv.Workloads[i].Source = rules.Source{File: src.file, Locator: &locator{src: src, kind: inv.Workloads[i].Kind}}
+		}
+	}()
 	switch meta.Kind {
 	case "":
 		// Not a Kubernetes object (for example a values file): ignore it.
 	case "List":
-		for _, item := range meta.Items {
-			if err := addJSON(inv, item); err != nil {
+		var items *goyaml.Node
+		if _, v := key(src.node, "items"); v != nil && v.Kind == goyaml.SequenceNode {
+			items = v
+		}
+		for i, item := range meta.Items {
+			child := src
+			child.node = nil
+			if items != nil && i < len(items.Content) && items.Content[i].Kind == goyaml.MappingNode {
+				child.node = items.Content[i]
+			}
+			if err := addJSON(inv, item, child); err != nil {
 				return err
 			}
 		}

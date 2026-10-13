@@ -226,3 +226,86 @@ metadata: {name: not-karpenter}
 		t.Fatal("Karpenter objects are not workloads")
 	}
 }
+
+func TestFindingLines(t *testing.T) {
+	// Line numbers are those of the file: the CronJob document starts at line 13, the CronJob and the
+	// List item are located inside their own nesting.
+	doc := `apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: web
+spec:
+  replicas: 3
+  template:
+    spec:
+      containers:
+        - name: web
+          image: x
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: nightly
+spec:
+  jobTemplate:
+    spec:
+      backoffLimit: 0
+      template:
+        spec:
+          containers:
+            - name: a.b
+              image: x
+---
+apiVersion: v1
+kind: List
+items:
+  - apiVersion: apps/v1
+    kind: StatefulSet
+    metadata: {name: db}
+    spec:
+      replicas: 1
+      template:
+        spec:
+          containers: [{name: db, image: x}]
+`
+	inv := &rules.Inventory{}
+	if err := addFile(inv, "k8s/app.yaml", []byte(doc)); err != nil {
+		t.Fatal(err)
+	}
+	res := rules.Analyze(inv, false)
+	lines := map[string]int{}
+	for _, r := range res {
+		for _, f := range r.Findings {
+			if f.File != "k8s/app.yaml" {
+				t.Fatalf("file = %q", f.File)
+			}
+			lines[r.Name+" "+f.Rule] = f.Line
+		}
+	}
+	want := map[string]int{
+		"web SR006":     10, // the container "web"
+		"nightly SR010": 20, // backoffLimit: 0
+		"nightly SR006": 0,  // not a rule for Jobs
+		"db SR001":      34, // replicas: 1 inside the List item
+		"db SR006":      37, // the one-line container list
+	}
+	for k, v := range want {
+		if v == 0 {
+			if _, ok := lines[k]; ok {
+				t.Errorf("%s should not exist", k)
+			}
+			continue
+		}
+		if lines[k] != v {
+			t.Errorf("%s at line %d, want %d (all: %v)", k, lines[k], v, lines)
+		}
+	}
+	// An object without a locator (a bare stream with no file) still gets a file name only when given.
+	plain := &rules.Inventory{}
+	if err := Add(plain, []byte(doc)); err != nil {
+		t.Fatal(err)
+	}
+	if f := rules.Analyze(plain, false)[0].Findings; len(f) > 0 && f[0].File != "" {
+		t.Errorf("stdin has no file, got %q", f[0].File)
+	}
+}

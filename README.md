@@ -129,6 +129,7 @@ jobs:
 | `comment` | `false` | Comment on the pull request and keep that comment updated |
 | `fail-on` | empty | `not-ready` or `caveats` fails the job; the comment is still posted |
 | `fail-on-regression` | `false` | Fail when the pull request adds a blocker or caveat finding that the base branch did not have |
+| `sarif` | empty | Also write a SARIF report to this file, to upload to Code Scanning |
 | `config` | empty | Config file; defaults to `.spot-readiness.yaml` in the repository root |
 | `include-system` | `false` | Also analyze `kube-system` and the other system namespaces |
 | `version` | the action's version | A release such as `v0.6.0`; with a branch ref it uses the latest release |
@@ -252,6 +253,43 @@ ready with caveats. Jobs, CronJobs and ScaledJobs are not counted: they request 
 weighing them like always-on services would overstate their share. The link in the output opens the
 [Kubernetes savings calculator](https://www.robertasoliman.com/en/tools/kubernetes-savings-calculator)
 with that number filled in as the interruption-tolerant share.
+
+## SARIF and Code Scanning (`-f sarif`)
+
+`scan -f sarif ./k8s` writes a SARIF 2.1.0 report that GitHub Code Scanning shows on the manifest
+line, in the pull request's Files changed tab:
+
+```
+k8s/deployment.yaml:42   SR006   container "api" has no readinessProbe
+```
+
+Each finding points to the field it is about: the container for SR006 and SR008, `replicas` for
+SR001, `terminationGracePeriodSeconds` for SR003, `backoffLimit` for SR010, the node selector or
+affinity for SR016 to SR019. A finding about a setting that is missing from the manifest (no
+`preStop`, no topology spread) points to the nearest part that exists, such as the pod `spec`, and
+one that is not about a field (SR005, a missing PodDisruptionBudget) to the object's `name`. Blockers
+are errors, caveats warnings and infos notes. Paths are relative to the directory where you run the
+scan, so run it from the repository root. The alert fingerprint ignores the line number, so editing the
+file does not reopen a dismissed alert. Findings from a cluster scan have no file, and the Karpenter
+(`KR`) rules are not included. `-v` also prints `file:line` for each finding, and the JSON findings have
+`file` and `line`.
+
+```yaml
+permissions:
+  contents: read
+  pull-requests: write
+  security-events: write
+steps:
+  - uses: actions/checkout@v4
+  - uses: robertasolimandonofreo/spot-readiness@main
+    with:
+      path: k8s
+      sarif: spot-readiness.sarif
+  - uses: github/codeql-action/upload-sarif@v3
+    if: always()
+    with:
+      sarif_file: spot-readiness.sarif
+```
 
 ## Regressions (`--baseline`)
 

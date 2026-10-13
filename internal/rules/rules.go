@@ -53,6 +53,11 @@ type Finding struct {
 	Rule     string   `json:"rule"`
 	Severity Severity `json:"severity"`
 	Message  string   `json:"message"`
+	// File and Line point to the manifest field the finding is about, when it was read from a file.
+	File string `json:"file,omitempty"`
+	Line int    `json:"line,omitempty"`
+	// Path names that field for a Locator.
+	Path string `json:"-"`
 }
 
 type Verdict string
@@ -103,26 +108,40 @@ func f(id string, s Severity, format string, args ...any) *Finding {
 	return &Finding{Rule: id, Severity: s, Message: fmt.Sprintf(format, args...)}
 }
 
+// at sets the manifest path a finding points to.
+func at(path string, fd *Finding) *Finding {
+	fd.Path = path
+	return fd
+}
+
+// placementPath is the field that holds the workload's node constraints.
+func placementPath(w Workload) string {
+	if len(w.Template.Spec.NodeSelector) > 0 {
+		return "pod.nodeSelector"
+	}
+	return "pod.affinity"
+}
+
 func containers(w Workload) []corev1.Container { return w.Template.Spec.Containers }
 
 var all = []rule{
 	{"SR001", scopeService, func(inv *Inventory, w Workload) *Finding {
 		if w.Kind == "Pod" {
-			return f("SR001", Blocker, "bare Pod: nothing recreates it after an interruption")
+			return at("spec", f("SR001", Blocker, "bare Pod: nothing recreates it after an interruption"))
 		}
 		n := inv.MinReplicas(w)
 		if n <= 1 {
-			return f("SR001", Blocker, "runs with %d replica: an interruption means downtime", n)
+			return at("spec.replicas", f("SR001", Blocker, "runs with %d replica: an interruption means downtime", n))
 		}
 		if min := inv.opts.minReplicas(); n < min {
-			return f("SR001", Blocker, "runs with %d replicas, below the configured minimum of %d", n, min)
+			return at("spec.replicas", f("SR001", Blocker, "runs with %d replicas, below the configured minimum of %d", n, min))
 		}
 		return nil
 	}},
 	{"SR002", scopeAll, func(_ *Inventory, w Workload) *Finding {
 		for _, v := range w.Template.Spec.Volumes {
 			if v.HostPath != nil {
-				return f("SR002", Blocker, "hostPath volume %q: its data is lost with the node", v.Name)
+				return at("pod.volumes", f("SR002", Blocker, "hostPath volume %q: its data is lost with the node", v.Name))
 			}
 		}
 		return nil
@@ -133,7 +152,7 @@ var all = []rule{
 			grace = *g
 		}
 		if grace > spotNoticeSeconds {
-			return f("SR003", Caveat, "terminationGracePeriodSeconds is %ds, but Spot gives only %ds of notice", grace, spotNoticeSeconds)
+			return at("pod.terminationGracePeriodSeconds", f("SR003", Caveat, "terminationGracePeriodSeconds is %ds, but Spot gives only %ds of notice", grace, spotNoticeSeconds))
 		}
 		return nil
 	}},
@@ -146,7 +165,7 @@ var all = []rule{
 			(len(s.Affinity.PodAntiAffinity.RequiredDuringSchedulingIgnoredDuringExecution) > 0 ||
 				len(s.Affinity.PodAntiAffinity.PreferredDuringSchedulingIgnoredDuringExecution) > 0)
 		if len(s.TopologySpreadConstraints) == 0 && !anti {
-			return f("SR004", Caveat, "no topology spread or pod anti-affinity: replicas can land on the same node or zone")
+			return at("pod.topologySpreadConstraints", f("SR004", Caveat, "no topology spread or pod anti-affinity: replicas can land on the same node or zone"))
 		}
 		return nil
 	}},
@@ -185,7 +204,7 @@ var all = []rule{
 	{"SR006", scopeService, func(_ *Inventory, w Workload) *Finding {
 		for _, c := range containers(w) {
 			if c.ReadinessProbe == nil {
-				return f("SR006", Caveat, "container %q has no readinessProbe: traffic can reach a pod that is not ready", c.Name)
+				return at("pod.containers["+c.Name+"]", f("SR006", Caveat, "container %q has no readinessProbe: traffic can reach a pod that is not ready", c.Name))
 			}
 		}
 		return nil
@@ -198,7 +217,11 @@ var all = []rule{
 			}
 		}
 		if claims {
-			return f("SR007", Caveat, "uses persistent volumes: zonal disks make rescheduling slower and tied to one zone")
+			path := "pod.volumes"
+			if w.ClaimTemplates {
+				path = "spec.volumeClaimTemplates"
+			}
+			return at(path, f("SR007", Caveat, "uses persistent volumes: zonal disks make rescheduling slower and tied to one zone"))
 		}
 		return nil
 	}},
@@ -206,7 +229,7 @@ var all = []rule{
 		for _, c := range containers(w) {
 			r := c.Resources.Requests
 			if r.Cpu().IsZero() || r.Memory().IsZero() {
-				return f("SR008", Info, "container %q is missing CPU or memory requests: the autoscaler cannot bin-pack it well", c.Name)
+				return at("pod.containers["+c.Name+"]", f("SR008", Info, "container %q is missing CPU or memory requests: the autoscaler cannot bin-pack it well", c.Name))
 			}
 		}
 		return nil
@@ -217,15 +240,15 @@ var all = []rule{
 				return nil
 			}
 		}
-		return f("SR009", Info, "no preStop hook: in-flight requests may be cut when the node is reclaimed")
+		return at("pod.containers", f("SR009", Info, "no preStop hook: in-flight requests may be cut when the node is reclaimed"))
 	}},
 	{"SR016", scopeAll, func(inv *Inventory, w Workload) *Finding {
 		p := placementOf(w)
 		switch n := len(p.zones); {
 		case n == 1:
-			return f("SR016", Caveat, "restricted to a single Availability Zone (%s): one zone running out of Spot capacity leaves it without nodes", sortedKeys(p.zones)[0])
+			return at(placementPath(w), f("SR016", Caveat, "restricted to a single Availability Zone (%s): one zone running out of Spot capacity leaves it without nodes", sortedKeys(p.zones)[0]))
 		case n > 1 && n < inv.opts.minZones():
-			return f("SR016", Caveat, "restricted to %d Availability Zones, fewer than the configured minimum of %d", n, inv.opts.minZones())
+			return at(placementPath(w), f("SR016", Caveat, "restricted to %d Availability Zones, fewer than the configured minimum of %d", n, inv.opts.minZones()))
 		}
 		return nil
 	}},
@@ -233,9 +256,9 @@ var all = []rule{
 		p := placementOf(w)
 		switch {
 		case p.hostname:
-			return f("SR017", Caveat, "pinned to specific nodes by kubernetes.io/hostname: it cannot move to another Spot node")
+			return at(placementPath(w), f("SR017", Caveat, "pinned to specific nodes by kubernetes.io/hostname: it cannot move to another Spot node"))
 		case len(p.types) == 1:
-			return f("SR017", Caveat, "requires instance type %s: a single Spot pool means one capacity shortage leaves it without nodes", sortedKeys(p.types)[0])
+			return at(placementPath(w), f("SR017", Caveat, "requires instance type %s: a single Spot pool means one capacity shortage leaves it without nodes", sortedKeys(p.types)[0]))
 		}
 		return nil
 	}},
@@ -254,11 +277,11 @@ var all = []rule{
 		if len(why) == 0 {
 			return nil
 		}
-		return f("SR018", Info, "limits Spot capacity flexibility: %s", strings.Join(why, "; "))
+		return at(placementPath(w), f("SR018", Info, "limits Spot capacity flexibility: %s", strings.Join(why, "; ")))
 	}},
 	{"SR019", scopeAll, func(_ *Inventory, w Workload) *Finding {
 		if n := placementOf(w).dimensions(); n >= 3 {
-			return f("SR019", Caveat, "required nodeSelector and nodeAffinity pin down %d aspects of the placement (zone, instance, architecture or custom labels): few nodes can match", n)
+			return at(placementPath(w), f("SR019", Caveat, "required nodeSelector and nodeAffinity pin down %d aspects of the placement (zone, instance, architecture or custom labels): few nodes can match", n))
 		}
 		return nil
 	}},
@@ -268,19 +291,19 @@ var all = []rule{
 			limit = *w.BackoffLimit
 		}
 		if limit == 0 {
-			return f("SR010", Blocker, "backoffLimit is 0: a single lost pod fails the whole job")
+			return at("job.backoffLimit", f("SR010", Blocker, "backoffLimit is 0: a single lost pod fails the whole job"))
 		}
 		return nil
 	}},
 	{"SR011", scopeBatch, func(_ *Inventory, w Workload) *Finding {
 		if w.ActiveDeadlineSeconds != nil {
-			return f("SR011", Info, "activeDeadlineSeconds is %ds: time spent retrying after an interruption counts against it", *w.ActiveDeadlineSeconds)
+			return at("job.activeDeadlineSeconds", f("SR011", Info, "activeDeadlineSeconds is %ds: time spent retrying after an interruption counts against it", *w.ActiveDeadlineSeconds))
 		}
 		return nil
 	}},
 	{"SR012", scopeBatch, func(_ *Inventory, w Workload) *Finding {
 		if !w.IgnoresDisruption {
-			return f("SR012", Info, "no podFailurePolicy that ignores DisruptionTarget: a pod lost to an interruption can count against backoffLimit")
+			return at("job.podFailurePolicy", f("SR012", Info, "no podFailurePolicy that ignores DisruptionTarget: a pod lost to an interruption can count against backoffLimit"))
 		}
 		return nil
 	}},
@@ -327,6 +350,10 @@ func Evaluate(inv *Inventory, w Workload) Result {
 			if ig, ok := inv.opts.ignoreFor(w, finding.Rule); ok {
 				res.Ignored = append(res.Ignored, Ignored{Rule: finding.Rule, Reason: ig.Reason})
 				continue
+			}
+			finding.File = w.Source.File
+			if w.Source.Locator != nil {
+				finding.Line = w.Source.Locator.Line(finding.Path)
 			}
 			res.Findings = append(res.Findings, *finding)
 			res.Score -= Penalty[finding.Severity]
