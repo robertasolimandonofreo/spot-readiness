@@ -28,7 +28,7 @@ inputs:
     description: Also analyze kube-system, kube-public and kube-node-lease.
     default: "false"
   version:
-    description: spot-readiness version to run, for example v0.6.0. Defaults to the version of this action when it is used with a version tag, otherwise the latest release.
+    description: spot-readiness version to run, for example v0.7.0. Defaults to the version of this action when it is used with a version tag, otherwise the latest release.
     default: ""
   github-token:
     description: Token used to comment on the pull request (needs pull-requests write permission).
