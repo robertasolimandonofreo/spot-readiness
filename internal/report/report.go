@@ -26,6 +26,8 @@ type Summary struct {
 	Caveats  int `json:"readyWithCaveats"`
 	NotReady int `json:"notReady"`
 	Skipped  int `json:"skipped"`
+	// IgnoredFindings counts the findings that the configuration file silenced.
+	IgnoredFindings int `json:"ignoredFindings,omitempty"`
 	// CPUMilli and PotentialCPU cover long-running workloads only. Jobs and CronJobs request CPU
 	// only while they run, so counting them like always-on services would overstate their weight.
 	CPUMilli     int64 `json:"cpuRequestMillis"`
@@ -48,6 +50,7 @@ type Report struct {
 func Build(results []rules.Result, skipped int) Report {
 	s := Summary{Workloads: len(results), Skipped: skipped}
 	for _, r := range results {
+		s.IgnoredFindings += len(r.Ignored)
 		if r.Batch {
 			s.Batch++
 		} else {
@@ -131,6 +134,9 @@ func Markdown(w io.Writer, r Report) {
 		fmt.Fprintf(w, " (%d skipped)", s.Skipped)
 	}
 	fmt.Fprintln(w, ".")
+	if s.IgnoredFindings > 0 {
+		fmt.Fprintf(w, "\n%d finding(s) were ignored by the configuration file.\n", s.IgnoredFindings)
+	}
 	if s.CPUMilli > 0 {
 		fmt.Fprintf(w, "\nSpot potential: **%d%%** of requested CPU is in long-running workloads that are ready or ready with caveats (Jobs, CronJobs and ScaledJobs are not counted). [Estimate the savings](%s).\n", s.PotentialPercent, s.CalculatorURL)
 	}
@@ -218,12 +224,19 @@ func Table(w io.Writer, r Report, verbose bool) {
 	if verbose {
 		fmt.Fprintln(w)
 		for _, res := range r.Results {
-			if len(res.Findings) == 0 {
+			if len(res.Findings) == 0 && len(res.Ignored) == 0 {
 				continue
 			}
 			fmt.Fprintf(w, "%s/%s/%s\n", res.Namespace, strings.ToLower(res.Kind), res.Name)
 			for _, f := range res.Findings {
 				fmt.Fprintf(w, "  %s [%s] %s\n", f.Rule, f.Severity, f.Message)
+			}
+			for _, ig := range res.Ignored {
+				reason := ig.Reason
+				if reason == "" {
+					reason = "no reason given"
+				}
+				fmt.Fprintf(w, "  %s [ignored] %s\n", ig.Rule, reason)
 			}
 		}
 	}
@@ -234,6 +247,9 @@ func Table(w io.Writer, r Report, verbose bool) {
 		fmt.Fprintf(w, " (%d skipped)", s.Skipped)
 	}
 	fmt.Fprintln(w)
+	if s.IgnoredFindings > 0 {
+		fmt.Fprintf(w, "%d finding(s) ignored by the configuration file (-v lists them).\n", s.IgnoredFindings)
+	}
 	if s.CPUMilli > 0 {
 		fmt.Fprintf(w, "Spot potential: %d%% of requested CPU in long-running workloads (ready or with caveats; Jobs, CronJobs and ScaledJobs excluded).\n", s.PotentialPercent)
 		fmt.Fprintf(w, "Estimate the savings: %s\n", s.CalculatorURL)

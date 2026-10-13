@@ -15,6 +15,9 @@ inputs:
   comment:
     description: Post (and keep updating) a comment on the pull request.
     default: "false"
+  config:
+    description: Config file (see .spot-readiness.yaml in the README). Defaults to .spot-readiness.yaml in the repository root, when present. Its thresholds fail the job after the comment is posted.
+    default: ""
   include-system:
     description: Also analyze kube-system, kube-public and kube-node-lease.
     default: "false"
@@ -38,7 +41,6 @@ outputs:
   not-ready:
     description: Number of workloads that are not ready.
     value: ${{ steps.scan.outputs.not-ready }}
-
 runs:
   using: composite
   steps:
@@ -91,15 +93,20 @@ runs:
         INPUT_PATH: ${{ inputs.path }}
         INPUT_FAIL_ON: ${{ inputs.fail-on }}
         INPUT_INCLUDE_SYSTEM: ${{ inputs.include-system }}
+        INPUT_CONFIG: ${{ inputs.config }}
       run: |
         set -uo pipefail
         flags=()
         [ "$INPUT_INCLUDE_SYSTEM" = "true" ] && flags+=(--include-system)
+        [ -n "$INPUT_CONFIG" ] && flags+=(--config "$INPUT_CONFIG")
         # Word splitting of the path input is intended: it is a space-separated list.
         # shellcheck disable=SC2086
         spot-readiness scan ${flags[@]+"${flags[@]}"} -f markdown $INPUT_PATH > "$RUNNER_TEMP/spot-readiness-report.md"
         status=$?
-        if [ $status -ne 0 ]; then cat "$RUNNER_TEMP/spot-readiness-report.md"; exit $status; fi
+        # Exit 1 means a threshold from the config file was not met: still comment, fail afterwards.
+        threshold_failed=false
+        if [ $status -eq 1 ]; then threshold_failed=true
+        elif [ $status -ne 0 ]; then cat "$RUNNER_TEMP/spot-readiness-report.md"; exit $status; fi
         # shellcheck disable=SC2086
         spot-readiness scan ${flags[@]+"${flags[@]}"} -f json $INPUT_PATH > "$RUNNER_TEMP/spot-readiness.json"
 
@@ -108,6 +115,7 @@ runs:
           echo "ready=$(jq .summary.ready "$RUNNER_TEMP/spot-readiness.json")"
           echo "caveats=$(jq .summary.readyWithCaveats "$RUNNER_TEMP/spot-readiness.json")"
           echo "not-ready=$(jq .summary.notReady "$RUNNER_TEMP/spot-readiness.json")"
+          echo "threshold-failed=$threshold_failed"
         } >> "$GITHUB_OUTPUT"
         cat "$RUNNER_TEMP/spot-readiness-report.md" >> "$GITHUB_STEP_SUMMARY"
 
@@ -120,6 +128,11 @@ runs:
         GH_REPO: ${{ github.repository }}
       run: |
         gh pr comment "$PR_NUMBER" --body-file "$RUNNER_TEMP/spot-readiness-report.md" --edit-last --create-if-none
+
+    - name: Apply config thresholds
+      if: steps.scan.outputs.threshold-failed == 'true'
+      shell: bash
+      run: echo "::error::the thresholds in the spot-readiness config file were not met"; exit 1
 
     - name: Apply fail-on
       if: inputs.fail-on != ''

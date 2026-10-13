@@ -81,6 +81,8 @@ type Result struct {
 	// Runtime is where the pods run now. It is only set when a cluster was read, and it does not
 	// change the score: the manifest rules and the runtime placement answer different questions.
 	Runtime *Runtime `json:"runtime,omitempty"`
+	// Ignored lists the findings the configuration silenced, with the reason given.
+	Ignored []Ignored `json:"ignored,omitempty"`
 }
 
 type scope int
@@ -108,8 +110,12 @@ var all = []rule{
 		if w.Kind == "Pod" {
 			return f("SR001", Blocker, "bare Pod: nothing recreates it after an interruption")
 		}
-		if n := inv.MinReplicas(w); n <= 1 {
+		n := inv.MinReplicas(w)
+		if n <= 1 {
 			return f("SR001", Blocker, "runs with %d replica: an interruption means downtime", n)
+		}
+		if min := inv.opts.minReplicas(); n < min {
+			return f("SR001", Blocker, "runs with %d replicas, below the configured minimum of %d", n, min)
 		}
 		return nil
 	}},
@@ -213,9 +219,13 @@ var all = []rule{
 		}
 		return f("SR009", Info, "no preStop hook: in-flight requests may be cut when the node is reclaimed")
 	}},
-	{"SR016", scopeAll, func(_ *Inventory, w Workload) *Finding {
-		if p := placementOf(w); len(p.zones) == 1 {
+	{"SR016", scopeAll, func(inv *Inventory, w Workload) *Finding {
+		p := placementOf(w)
+		switch n := len(p.zones); {
+		case n == 1:
 			return f("SR016", Caveat, "restricted to a single Availability Zone (%s): one zone running out of Spot capacity leaves it without nodes", sortedKeys(p.zones)[0])
+		case n > 1 && n < inv.opts.minZones():
+			return f("SR016", Caveat, "restricted to %d Availability Zones, fewer than the configured minimum of %d", n, inv.opts.minZones())
 		}
 		return nil
 	}},
@@ -308,6 +318,16 @@ func Evaluate(inv *Inventory, w Workload) Result {
 			continue
 		}
 		if finding := r.check(inv, w); finding != nil {
+			if sev, ok := inv.opts.Severity[finding.Rule]; ok {
+				if sev == SeverityOff {
+					continue
+				}
+				finding.Severity = sev
+			}
+			if ig, ok := inv.opts.ignoreFor(w, finding.Rule); ok {
+				res.Ignored = append(res.Ignored, Ignored{Rule: finding.Rule, Reason: ig.Reason})
+				continue
+			}
 			res.Findings = append(res.Findings, *finding)
 			res.Score -= Penalty[finding.Severity]
 			switch {
@@ -354,9 +374,16 @@ func isPlaceholder(w Workload) bool {
 // workloads scaled to zero (nothing runs, so there is nothing to interrupt) and capacity
 // placeholders (pause containers only). Results are ordered worst first.
 func Analyze(inv *Inventory, includeSystem bool) []Result {
+	return AnalyzeWith(inv, Options{IncludeSystem: includeSystem})
+}
+
+// AnalyzeWith is Analyze with options: namespaces to exclude, rule severities, ignored findings and
+// the replica and zone minimums.
+func AnalyzeWith(inv *Inventory, opts Options) []Result {
+	inv.opts = opts
 	var out []Result
 	for _, w := range inv.Workloads {
-		if !includeSystem && (w.Namespace == "kube-system" || w.Namespace == "kube-public" || w.Namespace == "kube-node-lease") {
+		if opts.excludes(w.Namespace) {
 			inv.Skipped++
 			continue
 		}

@@ -128,6 +128,7 @@ jobs:
 | `path` | `.` | Files or directories to scan, separated by spaces |
 | `comment` | `false` | Comment on the pull request and keep that comment updated |
 | `fail-on` | empty | `not-ready` or `caveats` fails the job; the comment is still posted |
+| `config` | empty | Config file; defaults to `.spot-readiness.yaml` in the repository root |
 | `include-system` | `false` | Also analyze `kube-system` and the other system namespaces |
 | `version` | the action's version | A release such as `v0.6.0`; with a branch ref it uses the latest release |
 | `github-token` | `github.token` | Token used to comment |
@@ -250,6 +251,47 @@ ready with caveats. Jobs, CronJobs and ScaledJobs are not counted: they request 
 weighing them like always-on services would overstate their share. The link in the output opens the
 [Kubernetes savings calculator](https://www.robertasoliman.com/en/tools/kubernetes-savings-calculator)
 with that number filled in as the interruption-tolerant share.
+
+## Configuration (`.spot-readiness.yaml`)
+
+A team can adopt the tool without accepting every heuristic. The tool reads `.spot-readiness.yaml`
+(or `.yml`) from the current directory, or the file given with `--config`. Unknown fields and rule
+IDs are errors, so a typo does not silently disable a setting.
+
+```yaml
+version: 1
+
+thresholds:
+  minimumScore: 70        # exit 1 when a workload scores below this
+  failOn: not-ready       # not-ready or caveats, like --fail-on (the flag wins)
+
+exclude:
+  namespaces:             # skipped entirely, even with --include-system
+    - monitoring
+
+rules:
+  SR007:
+    severity: info        # blocker, caveat, info or off; also works for KR rules
+  SR009:
+    severity: "off"
+
+ignore:
+  - workload: database/postgres   # namespace/name; * matches within a part ("shop/*")
+    kind: StatefulSet             # optional
+    rules: [SR007]                # empty means every rule
+    reason: "Stateful workload intentionally kept on on-demand"
+
+spot:
+  minReplicas: 2          # SR001 fires below this (default 2)
+  minZones: 2             # SR016 and KR001 fire below this (default 2)
+```
+
+Overridden severities change the penalty and the verdict. Ignored findings do not count, but they
+stay visible: `-v` lists them with their reason, the JSON has an `ignored` list per workload and a
+`summary.ignoredFindings` count. The `reason` is optional, though it is what makes an ignore
+reviewable. The GitHub Action reads the file from the repository root (or its `config` input),
+posts the comment and then fails the job when a threshold is not met. Ignore entries apply to
+workloads, not to Karpenter NodePools: use `rules` to change or turn off a KR rule.
 
 ## JSON
 

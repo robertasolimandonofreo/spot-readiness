@@ -501,3 +501,78 @@ func TestNodeFromLabels(t *testing.T) {
 		t.Fatal("karpenter on-demand")
 	}
 }
+
+func TestOptions(t *testing.T) {
+	stateful := func() Workload {
+		w := healthy()
+		w.Name, w.Namespace, w.ClaimTemplates = "postgres", "database", true
+		return w
+	}
+	pdb := pdbFor("database", map[string]string{"app": "web"})
+	inv := func(opts Options) *Inventory {
+		i := &Inventory{PDBs: []policyv1.PodDisruptionBudget{pdb}, Workloads: []Workload{stateful()}}
+		AnalyzeWith(i, opts)
+		return i
+	}
+
+	// Without options SR007 is a caveat.
+	i := inv(Options{})
+	if got := ids(Evaluate(i, stateful())); got["SR007"] != Caveat {
+		t.Fatalf("default: %v", got)
+	}
+	// Severity override.
+	i = inv(Options{Severity: map[string]Severity{"SR007": Info}})
+	r := Evaluate(i, stateful())
+	if ids(r)["SR007"] != Info || r.Verdict != Ready || r.Score != 95 {
+		t.Fatalf("override: %v %s %d", ids(r), r.Verdict, r.Score)
+	}
+	// Off drops the rule.
+	i = inv(Options{Severity: map[string]Severity{"SR007": SeverityOff}})
+	if got := ids(Evaluate(i, stateful())); len(got) != 0 {
+		t.Fatalf("off: %v", got)
+	}
+	// Ignore keeps a record, and matches by pattern and kind.
+	i = inv(Options{Ignore: []Ignore{{Workload: "database/*", Kind: "deployment", Rules: []string{"SR007"}, Reason: "kept on on-demand"}}})
+	r = Evaluate(i, stateful())
+	if len(r.Findings) != 0 || len(r.Ignored) != 1 || r.Ignored[0].Reason != "kept on on-demand" || r.Verdict != Ready {
+		t.Fatalf("ignore: %+v", r)
+	}
+	i = inv(Options{Ignore: []Ignore{{Workload: "database/*", Kind: "StatefulSet", Rules: []string{"SR007"}}}})
+	if got := ids(Evaluate(i, stateful())); got["SR007"] != Caveat {
+		t.Fatalf("a different kind must not match: %v", got)
+	}
+	// An empty rule list ignores everything for the workload.
+	w := stateful()
+	w.Replicas = 1
+	i = inv(Options{Ignore: []Ignore{{Workload: "database/postgres"}}})
+	if r := Evaluate(i, w); len(r.Findings) != 0 || len(r.Ignored) == 0 {
+		t.Fatalf("ignore all: %+v", r)
+	}
+}
+
+func TestMinimums(t *testing.T) {
+	zone := "topology.kubernetes.io/zone"
+	w := healthy()
+	requireAffinity(&w, in(zone, "a", "b"))
+	inv := inventoryWithPDB()
+	AnalyzeWith(inv, Options{})
+	if _, ok := ids(Evaluate(inv, w))["SR016"]; ok {
+		t.Fatal("two zones is fine by default")
+	}
+	AnalyzeWith(inv, Options{MinZones: 3})
+	if ids(Evaluate(inv, w))["SR016"] != Caveat {
+		t.Fatal("two zones is too few when minZones is 3")
+	}
+	AnalyzeWith(inv, Options{MinReplicas: 4})
+	if ids(Evaluate(inv, healthy()))["SR001"] != Blocker {
+		t.Fatal("3 replicas is too few when minReplicas is 4")
+	}
+}
+
+func TestExcludeNamespaces(t *testing.T) {
+	inv := &Inventory{Workloads: []Workload{healthy(), func() Workload { w := healthy(); w.Namespace = "monitoring"; return w }()}}
+	got := AnalyzeWith(inv, Options{ExcludeNamespaces: []string{"monitoring"}})
+	if len(got) != 1 || got[0].Namespace != "shop" || inv.Skipped != 1 {
+		t.Fatalf("got %d results, %d skipped", len(got), inv.Skipped)
+	}
+}

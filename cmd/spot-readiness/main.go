@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/robertasolimandonofreo/spot-readiness/internal/cluster"
+	"github.com/robertasolimandonofreo/spot-readiness/internal/config"
 	"github.com/robertasolimandonofreo/spot-readiness/internal/interruption"
 	"github.com/robertasolimandonofreo/spot-readiness/internal/karpenter"
 	"github.com/robertasolimandonofreo/spot-readiness/internal/load"
@@ -34,6 +35,7 @@ Flags for scan:
   -n, --namespace string  only this namespace (cluster mode; default all)
       --karpenter         also check Karpenter NodePools (KR rules; cluster mode reads them, file mode reads them from the paths)
       --interruption      assess how ready the cluster is for Spot interruptions (on in cluster mode)
+      --config string     config file (default .spot-readiness.yaml in the current directory, if present)
       --fail-on string    exit 1 when a workload is "not-ready" or "caveats" (default: never)
 `
 
@@ -58,7 +60,7 @@ func main() {
 
 func scan(args []string) int {
 	fs := flag.NewFlagSet("scan", flag.ContinueOnError)
-	var format, failOn, kubeContext, kubeconfig, namespace string
+	var format, failOn, kubeContext, kubeconfig, namespace, configPath string
 	var verbose, includeSystem, withKarpenter, withInterruption bool
 	for _, name := range []string{"f", "format", "o", "output"} {
 		fs.StringVar(&format, name, "table", "output format: table, json, csv or markdown")
@@ -68,6 +70,7 @@ func scan(args []string) int {
 	fs.BoolVar(&includeSystem, "include-system", false, "include system namespaces")
 	fs.BoolVar(&withKarpenter, "karpenter", false, "check Karpenter NodePools")
 	fs.BoolVar(&withInterruption, "interruption", false, "assess interruption handling")
+	fs.StringVar(&configPath, "config", "", "config file")
 	fs.StringVar(&failOn, "fail-on", "", "not-ready or caveats")
 	fs.StringVar(&kubeContext, "context", "", "kubeconfig context")
 	fs.StringVar(&kubeconfig, "kubeconfig", "", "kubeconfig file")
@@ -93,6 +96,24 @@ func scan(args []string) int {
 		return 2
 	}
 
+	cfg := &config.Config{}
+	if configPath == "" {
+		configPath = config.Find()
+	}
+	if configPath != "" {
+		loaded, err := config.Load(configPath)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "error: %s: %v\n", configPath, err)
+			return 2
+		}
+		cfg = loaded
+		fmt.Fprintf(os.Stderr, "using config %s\n", configPath)
+	}
+	// The flag wins over the file, so one run can be stricter or looser than the team default.
+	if failOn == "" {
+		failOn = cfg.Thresholds.FailOn
+	}
+
 	var inv *rules.Inventory
 	var err error
 	if clusterMode {
@@ -104,7 +125,7 @@ func scan(args []string) int {
 		fmt.Fprintln(os.Stderr, "error:", err)
 		return 2
 	}
-	results := rules.Analyze(inv, includeSystem)
+	results := rules.AnalyzeWith(inv, cfg.Options(includeSystem))
 	rep := report.Build(results, inv.Skipped)
 	// The assessment looks for Karpenter and the Node Termination Handler, which only a whole
 	// cluster shows. It is on in cluster mode (unless one namespace was selected) and, for files,
@@ -118,7 +139,7 @@ func scan(args []string) int {
 		}
 	}
 	if withKarpenter {
-		rep.Karpenter = karpenter.Analyze(&inv.Karpenter)
+		rep.Karpenter = karpenter.AnalyzeWith(&inv.Karpenter, cfg.KarpenterOptions())
 		if rep.Karpenter == nil {
 			rep.Karpenter = []karpenter.Result{}
 		}
@@ -138,6 +159,16 @@ func scan(args []string) int {
 		return 2
 	}
 
+	below := 0
+	for _, r := range results {
+		if r.Score < cfg.Thresholds.MinimumScore {
+			below++
+		}
+	}
+	if below > 0 {
+		fmt.Fprintf(os.Stderr, "%d workload(s) score below the configured minimum of %d\n", below, cfg.Thresholds.MinimumScore)
+		return 1
+	}
 	if (failOn == "not-ready" && rep.Summary.NotReady > 0) ||
 		(failOn == "caveats" && rep.Summary.NotReady+rep.Summary.Caveats > 0) {
 		return 1

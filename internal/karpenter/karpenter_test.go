@@ -111,3 +111,22 @@ func TestZonesAndClaims(t *testing.T) {
 		t.Errorf("a single subnet zone should trigger KR001, got %q", ids(r))
 	}
 }
+
+func TestOptions(t *testing.T) {
+	p := pool("p", req(keyCapacity, "In", "spot", "on-demand"), req(keyZone, "In", "a", "b"), Requirement{Key: keyCategory, Operator: "Exists", MinValues: new(int)})
+	p.Spec.Disruption.Budgets = []Budget{{}}
+	inv := &Inventory{NodePools: []NodePool{p}}
+	if ids(find(t, AnalyzeWith(inv, Options{}), "p")) != "" {
+		t.Fatal("two zones is fine by default")
+	}
+	if ids(find(t, AnalyzeWith(inv, Options{MinZones: 3}), "p")) != "KR001" {
+		t.Fatal("two zones is too few when minZones is 3")
+	}
+	r := find(t, AnalyzeWith(inv, Options{MinZones: 3, Severity: map[string]string{"KR001": "info"}}), "p")
+	if r.Findings[0].Severity != "info" || *r.Score != 95 {
+		t.Fatalf("override: %+v %d", r.Findings, *r.Score)
+	}
+	if ids(find(t, AnalyzeWith(inv, Options{MinZones: 3, Severity: map[string]string{"KR001": "off"}}), "p")) != "" {
+		t.Fatal("off drops the rule")
+	}
+}

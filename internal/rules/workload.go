@@ -55,6 +55,8 @@ type Inventory struct {
 	// Karpenter holds the NodePools, NodeClaims and EC2NodeClasses. They are only analyzed on request.
 	Karpenter karpenter.Inventory
 
+	opts Options // set by AnalyzeWith
+
 	// nodes and pods hold the runtime placement read from a cluster: see SetNodes and AddPod.
 	nodes map[string]Node
 	pods  map[string][]string

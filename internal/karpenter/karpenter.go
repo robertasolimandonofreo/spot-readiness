@@ -187,8 +187,23 @@ func blocksAllDisruption(b Budget) bool {
 	return (b.Nodes.Type == intstr.Int && b.Nodes.IntVal == 0) || b.Nodes.StrVal == "0" || b.Nodes.StrVal == "0%"
 }
 
+// Options tunes the analysis. The zero value is the default behavior.
+type Options struct {
+	// Severity overrides the severity of a rule by ID ("blocker", "caveat" or "info"); "off" drops it.
+	Severity map[string]string
+	// MinZones is the zone count below which KR001 fires (default 2).
+	MinZones int
+}
+
 // Analyze evaluates every NodePool, in name order.
-func Analyze(inv *Inventory) []Result {
+func Analyze(inv *Inventory) []Result { return AnalyzeWith(inv, Options{}) }
+
+// AnalyzeWith is Analyze with options.
+func AnalyzeWith(inv *Inventory, opts Options) []Result {
+	minZones := opts.MinZones
+	if minZones < 1 {
+		minZones = 2
+	}
 	classZones := map[string][]string{}
 	for _, c := range inv.NodeClasses {
 		classZones[c.Name] = c.Zones
@@ -240,10 +255,19 @@ func Analyze(inv *Inventory) []Result {
 			continue
 		}
 		add := func(id, sev, format string, args ...any) {
+			if o, ok := opts.Severity[id]; ok {
+				if o == "off" {
+					return
+				}
+				sev = o
+			}
 			res.Findings = append(res.Findings, Finding{Rule: id, Severity: sev, Message: fmt.Sprintf(format, args...)})
 		}
-		if res.Zones == 1 {
+		switch {
+		case res.Zones == 1:
 			add("KR001", "caveat", "supports only one Availability Zone: that zone running out of Spot capacity leaves the pool without nodes")
+		case res.Zones > 1 && res.Zones < minZones:
+			add("KR001", "caveat", "supports %d Availability Zones, fewer than the configured minimum of %d", res.Zones, minZones)
 		}
 		if hasFamilies && res.InstanceFamilies < minFamilies {
 			add("KR002", "caveat", "allows only %d instance families (at least %d recommended)", res.InstanceFamilies, minFamilies)
