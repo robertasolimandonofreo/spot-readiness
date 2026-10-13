@@ -153,7 +153,8 @@ jobs:
 | `comment` | `false` | Comment on the pull request and keep that comment updated |
 | `fail-on` | empty | `not-ready` or `caveats` fails the job; the comment is still posted |
 | `fail-on-regression` | `false` | Fail when the pull request adds a blocker or caveat finding that the base branch did not have |
-| `sarif` | empty | Also write a SARIF report to this file, to upload to Code Scanning |
+| `sarif` | empty | Also write a SARIF report to this file |
+| `upload-sarif` | `false` | Upload the SARIF report to code scanning (needs `security-events: write`) |
 | `config` | empty | Config file; defaults to `.spot-readiness.yaml` in the repository root |
 | `include-system` | `false` | Also analyze `kube-system` and the other system namespaces |
 | `version` | the action's version | A release such as `v0.7.1`; with a branch ref it uses the latest release |
@@ -451,12 +452,13 @@ steps:
   - uses: robertasolimandonofreo/spot-readiness@v0.7.1
     with:
       path: k8s
-      sarif: spot-readiness.sarif
-  - uses: github/codeql-action/upload-sarif@v3
-    if: always()
-    with:
-      sarif_file: spot-readiness.sarif
+      upload-sarif: "true"
 ```
+
+`upload-sarif: "true"` makes the action upload the report itself (with `github/codeql-action/upload-sarif`,
+category `spot-readiness`), so one step does the whole integration. It is off by default because it needs the
+`security-events: write` permission, which pull requests from forks do not get. To upload on your own, set
+`sarif: spot-readiness.sarif` instead and add the upload step.
 
 ## Regressions (`--baseline`)
 
@@ -538,7 +540,26 @@ workloads, not to Karpenter NodePools: use `rules` to change or turn off a KR ru
 
 ## JSON
 
-`-f json` prints a `summary` and a `results` list with each workload's verdict, score and findings.
+`-f json` prints a `summary` and a `results` list with each workload's verdict, score, confidence
+and findings, plus the `karpenter`, `interruption` and `comparison` objects when they were asked for.
+`plan -f json` prints the plan, with the `cost` estimate when `--pricing` was used.
+
+```json
+{
+  "schemaVersion": "1",
+  "toolVersion": "v0.8.0",
+  "summary": {},
+  "results": []
+}
+```
+
+`schemaVersion` is the layout of the JSON, and `toolVersion` the release that wrote it. Adding a field
+does not change the schema version; renaming or removing a field, or changing what one means, does.
+That matters for `--baseline`, which reads a report from an earlier run: it reads a report from before
+0.8.0 (no `schemaVersion`) as schema 1, which has the same layout, and it refuses a report with a newer
+schema than the tool knows, saying which release wrote it, because comparing against a layout it cannot
+read would hide regressions instead of reporting them. When the schema changes, the tool will read the
+previous one.
 
 ## Limits
 
