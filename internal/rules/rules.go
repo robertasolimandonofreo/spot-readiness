@@ -37,7 +37,7 @@ var Descriptions = []struct{ ID, Severity, Text string }{
 	{"SR008", "info", "A container without CPU or memory requests"},
 	{"SR009", "info", "No preStop hook in any container"},
 	{"SR010", "blocker", "Job with backoffLimit 0: a single lost pod fails the whole job"},
-	{"SR011", "caveat", "Job with activeDeadlineSeconds: retries after an interruption count against the deadline"},
+	{"SR011", "info", "Job with activeDeadlineSeconds: retries after an interruption count against the deadline"},
 	{"SR012", "info", "Job without a podFailurePolicy that ignores DisruptionTarget: interruptions can count as failures"},
 	{"SR013", "info", "Job progress is lost on interruption unless the job checkpoints (cannot be verified)"},
 }
@@ -189,7 +189,7 @@ var all = []rule{
 	}},
 	{"SR011", scopeBatch, func(_ *Inventory, w Workload) *Finding {
 		if w.ActiveDeadlineSeconds != nil {
-			return f("SR011", Caveat, "activeDeadlineSeconds is %ds: time spent retrying after an interruption counts against it", *w.ActiveDeadlineSeconds)
+			return f("SR011", Info, "activeDeadlineSeconds is %ds: time spent retrying after an interruption counts against it", *w.ActiveDeadlineSeconds)
 		}
 		return nil
 	}},

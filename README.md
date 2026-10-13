@@ -126,7 +126,7 @@ least 50 points.
 | SR008 | info | A container without CPU or memory requests |
 | SR009 | info | No `preStop` hook in any container |
 | SR010 | blocker | Job with `backoffLimit: 0`: one lost pod fails the whole job |
-| SR011 | caveat | Job with `activeDeadlineSeconds`: retries after an interruption count against it |
+| SR011 | info | Job with `activeDeadlineSeconds`: retries after an interruption count against it |
 | SR012 | info | No `podFailurePolicy` that ignores `DisruptionTarget`: an interruption can count against `backoffLimit` |
 | SR013 | info | Progress is lost on interruption unless the job checkpoints (cannot be verified) |
 

@@ -237,7 +237,7 @@ func TestBatchRules(t *testing.T) {
 		{"backoffLimit 0", func(w *Workload) { w.BackoffLimit = &zero }, "SR010", Blocker},
 		{"default backoffLimit is fine", func(w *Workload) { w.BackoffLimit = nil }, "", ""},
 		{"explicit backoffLimit is fine", func(w *Workload) { w.BackoffLimit = &six }, "", ""},
-		{"active deadline", func(w *Workload) { w.ActiveDeadlineSeconds = &deadline }, "SR011", Caveat},
+		{"active deadline", func(w *Workload) { w.ActiveDeadlineSeconds = &deadline }, "SR011", Info},
 		{"no pod failure policy", func(w *Workload) { w.IgnoresDisruption = false }, "SR012", Info},
 		{"hostPath still blocks", func(w *Workload) {
 			w.Template.Spec.Volumes = []corev1.Volume{{Name: "h", VolumeSource: corev1.VolumeSource{HostPath: &corev1.HostPathVolumeSource{Path: "/x"}}}}
