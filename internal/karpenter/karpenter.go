@@ -334,3 +334,6 @@ var remediations = map[string]struct{ text, url string }{
 	"KR006": {"Allow on-demand as a fallback in this NodePool (Karpenter prefers Spot), or add an on-demand NodePool.\n\n# NodePool spec.template.spec.requirements\n- key: karpenter.sh/capacity-type\n  operator: In\n  values: [\"spot\", \"on-demand\"]", nodePoolDocs},
 	"KR007": {"Make Karpenter keep a minimum of instance diversity.\n\n# NodePool spec.template.spec.requirements\n- key: karpenter.k8s.aws/instance-family\n  operator: Exists\n  minValues: 5", nodePoolDocs},
 }
+
+// DocsURL is the documentation to read for a rule.
+func DocsURL(id string) string { return remediations[id].url }

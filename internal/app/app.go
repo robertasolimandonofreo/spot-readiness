@@ -22,10 +22,12 @@ Usage:
   spot-readiness scan [flags] <path>...   scan YAML/JSON files or directories ("-" reads stdin)
   spot-readiness scan [flags]             no paths: read the current cluster (read-only)
   spot-readiness plan [flags] [path]...   order the workloads into a Spot migration plan
+  spot-readiness explain <rule>           explain a rule: SR001 to SR019, KR001 to KR007
+  spot-readiness explain [flags] <namespace/name> [path]...   show how a workload got its score
   spot-readiness version
 
-Flags for scan (plan takes the same input flags, -f table, json or markdown, --suggest and --karpenter;
-it ignores --baseline and --fail-on):
+Flags for scan (plan and explain take the same input flags; plan also takes -f table, json or markdown,
+--suggest and --karpenter, and ignores --baseline and --fail-on):
   -f, --format string     table (default), json, csv, markdown or sarif (-o/--output also work)
   -v, --verbose           explain every finding
       --suggest           also print a suggested fix and a docs link for every finding
@@ -56,6 +58,8 @@ func Run(args []string, env Env) int {
 		return runScan(args[1:], env)
 	case "plan":
 		return runPlan(args[1:], env)
+	case "explain":
+		return runExplain(args[1:], env)
 	case "-h", "--help", "help":
 		fmt.Fprintf(env.Stdout, usage, env.Version)
 		return 0

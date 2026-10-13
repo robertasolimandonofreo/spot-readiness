@@ -289,6 +289,18 @@ weighing them like always-on services would overstate their share. The link in t
 [Kubernetes savings calculator](https://www.robertasoliman.com/en/tools/kubernetes-savings-calculator)
 with that number filled in as the interruption-tolerant share.
 
+## Explaining a rule or a score (`explain`)
+
+`spot-readiness explain SR014` prints the long form of a rule (SR001 to SR019, KR001 to KR007): its
+severity, why it matters on Spot, when it is reported, a problematic configuration, the recommended
+one and the documentation.
+
+`spot-readiness explain shop/api ./k8s` shows how that workload got its score: the 100 points,
+each finding and what it cost, the final score, why the verdict is what it is, the confidence and its
+reasons, the findings that the configuration file ignored and the flexibility. It takes the same
+input flags as `scan` (put them before the target), and the target is `namespace/name` or
+`namespace/kind/name` when two kinds share a name.
+
 ## Migration plan (`plan`)
 
 `spot-readiness plan [paths]` turns the analysis into an order of work. It takes the same input as
