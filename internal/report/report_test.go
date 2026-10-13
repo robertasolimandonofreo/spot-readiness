@@ -26,11 +26,11 @@ func TestCSV(t *testing.T) {
 	if err != nil {
 		t.Fatalf("output is not valid CSV: %v", err)
 	}
-	if len(rows) != 3 || len(rows[0]) != 11 {
-		t.Fatalf("want header plus 2 rows of 11 columns, got %d rows", len(rows))
+	if len(rows) != 3 || len(rows[0]) != 12 {
+		t.Fatalf("want header plus 2 rows of 12 columns, got %d rows", len(rows))
 	}
 	got := strings.Join(rows[1], "|")
-	want := "ready-with-caveats|85|shop|Deployment|web, v2|3|1500|false|SR006;SR009|0|"
+	want := "ready-with-caveats|85|shop|Deployment|web, v2|3|1500|false|SR006;SR009|0||"
 	if got != want {
 		t.Fatalf("row = %q, want %q", got, want)
 	}
@@ -51,7 +51,7 @@ func TestMarkdown(t *testing.T) {
 	for _, want := range []string{
 		MarkdownMarker, "## Spot readiness", "**2 workloads:** 1 ready, 0 with caveats, 1 not ready (2 skipped)",
 		"**90%**", "https://www.robertasoliman.com/en/tools/kubernetes-savings-calculator?tolerant=90",
-		"| not-ready | 15 | `shop/deployment/a\\|b` | 1 | SR001, SR006 |", "<summary>Rules</summary>", "**SR009**",
+		"| not-ready | 15 | - | `shop/deployment/a\\|b` | 1 | SR001, SR006 |", "<summary>Rules</summary>", "**SR009**",
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("markdown is missing %q\n%s", want, out)

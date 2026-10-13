@@ -87,6 +87,10 @@ type Result struct {
 	// Flexibility is how many capacity pools the workload can use. It is reported on its own and
 	// is not part of the score; the SR016 to SR019 findings are.
 	Flexibility Flexibility `json:"flexibility"`
+	// Confidence is how far the verdict can be trusted as a prediction ("high", "medium" or "low"),
+	// and ConfidenceReasons the unknowns that lower it. It does not change the score.
+	Confidence        string   `json:"confidence"`
+	ConfidenceReasons []string `json:"confidenceReasons"`
 	// Runtime is where the pods run now. It is only set when a cluster was read, and it does not
 	// change the score: the manifest rules and the runtime placement answer different questions.
 	Runtime *Runtime `json:"runtime,omitempty"`
@@ -340,6 +344,7 @@ func Evaluate(inv *Inventory, w Workload) Result {
 	res := Result{Kind: w.Kind, Namespace: w.Namespace, Name: w.Name, Replicas: replicas, Batch: w.Batch,
 		CPUMilli: cpuMilli(w, replicas), OnSpot: onSpot(w), Score: 100, Verdict: Ready, Findings: []Finding{},
 		Flexibility: flexibilityOf(w), Runtime: inv.runtimeOf(w)}
+	res.Confidence, res.ConfidenceReasons = confidenceOf(w, res.Flexibility)
 	for _, r := range all {
 		if (r.scope == scopeBatch && !w.Batch) || (r.scope == scopeService && w.Batch) {
 			continue

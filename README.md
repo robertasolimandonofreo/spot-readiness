@@ -181,6 +181,17 @@ SR001, SR004, SR005, SR006, SR009, SR014 and SR015 apply to long-running workloa
 Argo Rollouts and bare Pods). SR010 to SR013 apply to Jobs, CronJobs and KEDA ScaledJobs. SR002, SR003, SR007, SR008 and
 SR016 to SR019 apply to all of them.
 
+### Confidence
+
+The score counts what the manifest shows. Confidence counts what it cannot show: whether an
+application replicates and recovers its own state, whether a job checkpoints, which nodes sit behind
+a scheduling constraint. Each workload gets `high`, `medium` or `low`, in the `CONFIDENCE` column and
+the JSON `confidence` field, with the reasons in `confidenceReasons`. A stateless Deployment with
+nothing hidden is `high`; one unknown (a StatefulSet, a Job, a bare Pod, constraints that narrow the
+capacity pools) is `medium`; persistent volumes, a `hostPath` volume or two unknowns together are
+`low`. Confidence never changes the score or the verdict: a `ready` workload with `low` confidence
+is a reason to test it, not to trust the score.
+
 ### Interruption handling (cluster mode)
 
 Workloads that are ready for Spot still lose their node if nothing reacts to the 2-minute notice.

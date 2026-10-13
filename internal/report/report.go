@@ -105,7 +105,7 @@ func JSON(w io.Writer, r Report) error {
 func CSV(w io.Writer, r Report) error {
 	cw := csv.NewWriter(w)
 	if err := cw.Write([]string{"verdict", "score", "namespace", "kind", "name", "replicas",
-		"cpu_request_millis", "already_on_spot", "findings", "flexibility_score", "runtime_resilience"}); err != nil {
+		"cpu_request_millis", "already_on_spot", "findings", "flexibility_score", "runtime_resilience", "confidence"}); err != nil {
 		return err
 	}
 	for _, res := range r.Results {
@@ -119,7 +119,7 @@ func CSV(w io.Writer, r Report) error {
 		}
 		if err := cw.Write([]string{string(res.Verdict), strconv.Itoa(res.Score), res.Namespace, res.Kind,
 			res.Name, strconv.Itoa(int(res.Replicas)), strconv.FormatInt(res.CPUMilli, 10),
-			strconv.FormatBool(res.OnSpot), strings.Join(ids, ";"), strconv.Itoa(res.Flexibility.Score), resilience}); err != nil {
+			strconv.FormatBool(res.OnSpot), strings.Join(ids, ";"), strconv.Itoa(res.Flexibility.Score), resilience, res.Confidence}); err != nil {
 			return err
 		}
 	}
@@ -166,8 +166,8 @@ func Markdown(w io.Writer, r Report) {
 	if len(attention) == 0 {
 		fmt.Fprintln(w, "\nNo workload needs attention.")
 	} else {
-		fmt.Fprintln(w, "\n| Verdict | Score | Workload | Replicas | Findings |")
-		fmt.Fprintln(w, "|---|---|---|---|---|")
+		fmt.Fprintln(w, "\n| Verdict | Score | Confidence | Workload | Replicas | Findings |")
+		fmt.Fprintln(w, "|---|---|---|---|---|---|")
 		for i, res := range attention {
 			if i == maxMarkdownRows {
 				break
@@ -176,7 +176,7 @@ func Markdown(w io.Writer, r Report) {
 			for _, f := range res.Findings {
 				ids = append(ids, f.Rule)
 			}
-			fmt.Fprintf(w, "| %s | %d | `%s/%s/%s` | %d | %s |\n", res.Verdict, res.Score,
+			fmt.Fprintf(w, "| %s | %d | %s | `%s/%s/%s` | %d | %s |\n", res.Verdict, res.Score, dash(res.Confidence),
 				mdCell(res.Namespace), strings.ToLower(res.Kind), mdCell(res.Name), res.Replicas, strings.Join(ids, ", "))
 		}
 		if len(attention) > maxMarkdownRows {
@@ -249,7 +249,7 @@ func printFix(w io.Writer, remediation, docs string) {
 func TableWith(w io.Writer, r Report, opts TableOptions) {
 	verbose := opts.Verbose || opts.Suggest
 	tw := tabwriter.NewWriter(w, 0, 4, 2, ' ', 0)
-	fmt.Fprintln(tw, "VERDICT\tSCORE\tWORKLOAD\tREPLICAS\tCPU\tSPOT\tFINDINGS")
+	fmt.Fprintln(tw, "VERDICT\tSCORE\tCONFIDENCE\tWORKLOAD\tREPLICAS\tCPU\tSPOT\tFINDINGS")
 	for _, res := range r.Results {
 		spot := "-"
 		if res.OnSpot {
@@ -259,7 +259,7 @@ func TableWith(w io.Writer, r Report, opts TableOptions) {
 		for _, f := range res.Findings {
 			ids = append(ids, f.Rule)
 		}
-		fmt.Fprintf(tw, "%s\t%d\t%s/%s/%s\t%d\t%dm\t%s\t%s\n", res.Verdict, res.Score,
+		fmt.Fprintf(tw, "%s\t%d\t%s\t%s/%s/%s\t%d\t%dm\t%s\t%s\n", res.Verdict, res.Score, dash(res.Confidence),
 			res.Namespace, strings.ToLower(res.Kind), res.Name, res.Replicas, res.CPUMilli, spot, strings.Join(ids, ","))
 	}
 	tw.Flush()
