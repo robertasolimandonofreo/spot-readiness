@@ -171,3 +171,20 @@ func Assess(inv *rules.Inventory, results []rules.Result) Assessment {
 	a.Score = &score
 	return a
 }
+
+// Prerequisites lists what the cluster still needs, before any workload moves, to act on a Spot
+// interruption notice. Unlike Assess it does not need Spot nodes to exist yet. It is only reliable
+// when the whole cluster was read, since Karpenter and the handler live in their own namespaces.
+func Prerequisites(inv *rules.Inventory) []string {
+	controller, queue := findKarpenter(inv)
+	nth := findNTH(inv)
+	switch {
+	case controller && queue && nth:
+		return []string{"Run only one of Karpenter's interruption queue and the Node Termination Handler: both react to the same events."}
+	case controller && !queue && !nth:
+		return []string{"Configure Karpenter's interruption queue (settings.interruptionQueue) so it can drain and replace a Spot node when AWS sends the 2-minute notice."}
+	case !controller && !nth && len(inv.Karpenter.NodePools) == 0:
+		return []string{"Set up handling of Spot interruption notices: Karpenter with an interruption queue, EKS managed node groups (they drain Spot nodes themselves), or the AWS Node Termination Handler."}
+	}
+	return nil
+}

@@ -254,6 +254,53 @@ weighing them like always-on services would overstate their share. The link in t
 [Kubernetes savings calculator](https://www.robertasoliman.com/en/tools/kubernetes-savings-calculator)
 with that number filled in as the interruption-tolerant share.
 
+## Migration plan (`plan`)
+
+`spot-readiness plan [paths]` turns the analysis into an order of work. It takes the same input as
+`scan` (paths, or the cluster when there are none), the same `--config`, `--include-system`,
+`--karpenter` and `--interruption` flags, and `-f table`, `json` or `markdown`. `--suggest` adds the
+snippet of every change.
+
+```
+SPOT MIGRATION PLAN
+
+Total workloads:             42
+Ready now:                   18
+Ready after changes:         15
+Keep on on-demand:           9
+
+Requested CPU:               84 vCPU
+Immediately movable to Spot: 37 vCPU (44%)
+Potential after changes:     66 vCPU (79%)
+
+Phase 1: move now (safest first)
+  shop/deployment/api  (4 vCPU)
+  ...
+Phase 2: move after these changes (fewest changes first)
+  shop/deployment/checkout  (8 vCPU)
+    SR004  Spread the replicas across zones and nodes.
+    SR006  Add a readinessProbe so traffic only reaches pods that can serve it.
+Keep on on-demand
+  shop/statefulset/postgres  (6 vCPU)
+    uses persistent volumes: zonal disks make rescheduling slower and tied to one zone
+```
+
+Workloads fall in three groups:
+
+- **Ready now** (phase 1): no blocker and no caveat. Info findings are advice, not a condition.
+  Listed safest first (highest score, then the most CPU).
+- **Ready after changes** (phase 2): blockers or caveats, but none that configuration cannot fix.
+  Each change is the first line of the finding's suggested fix. Listed with the fewest changes first.
+- **Keep on on-demand**: data that lives on the node (SR002, `hostPath`) or a StatefulSet with
+  persistent volumes (SR007). Moving those is a design decision, not a configuration fix.
+
+The CPU figures cover long-running workloads, like the Spot potential of `scan`: Jobs and CronJobs
+are listed in the phases but not counted. When the cluster was read (or with `--interruption`),
+phase 0 lists what the platform needs before the first move: a Karpenter interruption queue or a
+Node Termination Handler (see Interruption handling), and, with `--karpenter`, the NodePool
+caveats. The groups and the order are heuristics from the manifests: they do not know how your
+application behaves, how much a move saves in money, or which teams own what.
+
 ## Suggested fixes (`--suggest`)
 
 Every finding carries a suggested fix and a link to the documentation. `scan --suggest` prints them

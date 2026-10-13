@@ -3,6 +3,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"flag"
 	"fmt"
 	"os"
@@ -13,6 +14,7 @@ import (
 	"github.com/robertasolimandonofreo/spot-readiness/internal/interruption"
 	"github.com/robertasolimandonofreo/spot-readiness/internal/karpenter"
 	"github.com/robertasolimandonofreo/spot-readiness/internal/load"
+	"github.com/robertasolimandonofreo/spot-readiness/internal/plan"
 	"github.com/robertasolimandonofreo/spot-readiness/internal/report"
 	"github.com/robertasolimandonofreo/spot-readiness/internal/rules"
 )
@@ -24,9 +26,11 @@ const usage = `spot-readiness %s
 Usage:
   spot-readiness scan [flags] <path>...   scan YAML/JSON files or directories ("-" reads stdin)
   spot-readiness scan [flags]             no paths: read the current cluster (read-only)
+  spot-readiness plan [flags] [path]...   order the workloads into a Spot migration plan
   spot-readiness version
 
-Flags for scan:
+Flags for scan (plan takes the same input flags, -f table, json or markdown, --suggest and --karpenter;
+it ignores --baseline and --fail-on):
   -f, --format string     table (default), json, csv, markdown or sarif (-o/--output also work)
   -v, --verbose           explain every finding
       --suggest           also print a suggested fix and a docs link for every finding
@@ -51,7 +55,9 @@ func main() {
 	case "version", "--version":
 		fmt.Println(version)
 	case "scan":
-		os.Exit(scan(os.Args[2:]))
+		os.Exit(run(os.Args[2:], false))
+	case "plan":
+		os.Exit(run(os.Args[2:], true))
 	case "-h", "--help", "help":
 		fmt.Printf(usage, version)
 	default:
@@ -61,7 +67,8 @@ func main() {
 	}
 }
 
-func scan(args []string) int {
+// run is scan, or plan when planMode is set: both read the same input and run the same analysis.
+func run(args []string, planMode bool) int {
 	fs := flag.NewFlagSet("scan", flag.ContinueOnError)
 	var format, failOn, kubeContext, kubeconfig, namespace, configPath, baselinePath string
 	var verbose, includeSystem, withKarpenter, withInterruption, failOnRegression, suggest bool
@@ -92,6 +99,14 @@ func scan(args []string) int {
 	}
 	if format == "md" {
 		format = "markdown"
+	}
+	if planMode && format != "table" && format != "json" && format != "markdown" {
+		fmt.Fprintf(os.Stderr, "unknown format %q for plan (use table, json or markdown)\n", format)
+		return 2
+	}
+	if planMode && (baselinePath != "" || failOn != "" || failOnRegression) {
+		fmt.Fprintln(os.Stderr, "--baseline, --fail-on and --fail-on-regression apply to scan, not plan")
+		return 2
 	}
 	if format != "table" && format != "json" && format != "csv" && format != "markdown" && format != "sarif" {
 		fmt.Fprintf(os.Stderr, "unknown format %q (use table, json, csv, markdown or sarif)\n", format)
@@ -166,6 +181,35 @@ func scan(args []string) int {
 		if rep.Karpenter == nil {
 			rep.Karpenter = []karpenter.Result{}
 		}
+	}
+	if planMode {
+		var prerequisites []string
+		if rep.Interruption != nil {
+			prerequisites = append(prerequisites, interruption.Prerequisites(inv)...)
+		}
+		for _, np := range rep.Karpenter {
+			for _, f := range np.Findings {
+				if f.Severity != "info" {
+					prerequisites = append(prerequisites, fmt.Sprintf("NodePool %s (%s): %s", np.NodePool, f.Rule, f.Message))
+				}
+			}
+		}
+		p := plan.Build(results, prerequisites)
+		switch format {
+		case "json":
+			enc := json.NewEncoder(os.Stdout)
+			enc.SetIndent("", "  ")
+			err = enc.Encode(p)
+		case "markdown":
+			plan.Markdown(os.Stdout, p)
+		default:
+			plan.Table(os.Stdout, p, plan.Options{Suggest: suggest})
+		}
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "error:", err)
+			return 2
+		}
+		return 0
 	}
 	switch format {
 	case "json":

@@ -126,3 +126,34 @@ func TestQueueFromFlag(t *testing.T) {
 		t.Fatalf("queue = %s, want yes", a.InterruptionQueue)
 	}
 }
+
+func TestPrerequisites(t *testing.T) {
+	cases := []struct {
+		name  string
+		setup func(inv *rules.Inventory)
+		want  string
+	}{
+		{"karpenter with queue", func(inv *rules.Inventory) { inv.Workloads = []rules.Workload{controller(true)} }, ""},
+		{"karpenter without queue", func(inv *rules.Inventory) { inv.Workloads = []rules.Workload{controller(false)} }, "interruption queue"},
+		{"karpenter without queue but with handler", func(inv *rules.Inventory) {
+			inv.Workloads = []rules.Workload{controller(false)}
+			inv.DaemonSets = []rules.Workload{nth()}
+		}, ""},
+		{"nothing at all", func(*rules.Inventory) {}, "Set up handling"},
+		{"handler only", func(inv *rules.Inventory) { inv.DaemonSets = []rules.Workload{nth()} }, ""},
+		{"both", func(inv *rules.Inventory) {
+			inv.Workloads = []rules.Workload{controller(true)}
+			inv.DaemonSets = []rules.Workload{nth()}
+		}, "only one"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			inv := &rules.Inventory{}
+			c.setup(inv)
+			got := strings.Join(Prerequisites(inv), "\n")
+			if (c.want == "") != (got == "") || !strings.Contains(got, c.want) {
+				t.Fatalf("got %q, want one containing %q", got, c.want)
+			}
+		})
+	}
+}
