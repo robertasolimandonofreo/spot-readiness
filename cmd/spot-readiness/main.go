@@ -36,6 +36,8 @@ Flags for scan:
       --karpenter         also check Karpenter NodePools (KR rules; cluster mode reads them, file mode reads them from the paths)
       --interruption      assess how ready the cluster is for Spot interruptions (on in cluster mode)
       --config string     config file (default .spot-readiness.yaml in the current directory, if present)
+      --baseline string   JSON report (-f json) to compare with: shows new and resolved findings
+      --fail-on-regression exit 1 when a blocker or caveat finding is new compared with --baseline
       --fail-on string    exit 1 when a workload is "not-ready" or "caveats" (default: never)
 `
 
@@ -60,8 +62,8 @@ func main() {
 
 func scan(args []string) int {
 	fs := flag.NewFlagSet("scan", flag.ContinueOnError)
-	var format, failOn, kubeContext, kubeconfig, namespace, configPath string
-	var verbose, includeSystem, withKarpenter, withInterruption bool
+	var format, failOn, kubeContext, kubeconfig, namespace, configPath, baselinePath string
+	var verbose, includeSystem, withKarpenter, withInterruption, failOnRegression bool
 	for _, name := range []string{"f", "format", "o", "output"} {
 		fs.StringVar(&format, name, "table", "output format: table, json, csv or markdown")
 	}
@@ -70,6 +72,8 @@ func scan(args []string) int {
 	fs.BoolVar(&includeSystem, "include-system", false, "include system namespaces")
 	fs.BoolVar(&withKarpenter, "karpenter", false, "check Karpenter NodePools")
 	fs.BoolVar(&withInterruption, "interruption", false, "assess interruption handling")
+	fs.StringVar(&baselinePath, "baseline", "", "baseline JSON report")
+	fs.BoolVar(&failOnRegression, "fail-on-regression", false, "fail on new findings")
 	fs.StringVar(&configPath, "config", "", "config file")
 	fs.StringVar(&failOn, "fail-on", "", "not-ready or caveats")
 	fs.StringVar(&kubeContext, "context", "", "kubeconfig context")
@@ -114,6 +118,20 @@ func scan(args []string) int {
 		failOn = cfg.Thresholds.FailOn
 	}
 
+	if failOnRegression && baselinePath == "" {
+		fmt.Fprintln(os.Stderr, "--fail-on-regression needs --baseline")
+		return 2
+	}
+	var baseline report.Report
+	if baselinePath != "" {
+		b, err := report.LoadBaseline(baselinePath)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "error:", err)
+			return 2
+		}
+		baseline = b
+	}
+
 	var inv *rules.Inventory
 	var err error
 	if clusterMode {
@@ -127,6 +145,9 @@ func scan(args []string) int {
 	}
 	results := rules.AnalyzeWith(inv, cfg.Options(includeSystem))
 	rep := report.Build(results, inv.Skipped)
+	if baselinePath != "" {
+		rep.Comparison = report.Compare(baseline.Results, results)
+	}
 	// The assessment looks for Karpenter and the Node Termination Handler, which only a whole
 	// cluster shows. It is on in cluster mode (unless one namespace was selected) and, for files,
 	// only on request, because a repository rarely holds those components.
@@ -159,6 +180,10 @@ func scan(args []string) int {
 		return 2
 	}
 
+	if failOnRegression && rep.Comparison.Regressions() > 0 {
+		fmt.Fprintf(os.Stderr, "%d new blocker or caveat finding(s) compared with the baseline\n", rep.Comparison.Regressions())
+		return 1
+	}
 	below := 0
 	for _, r := range results {
 		if r.Score < cfg.Thresholds.MinimumScore {

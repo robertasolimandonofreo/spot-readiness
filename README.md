@@ -128,6 +128,7 @@ jobs:
 | `path` | `.` | Files or directories to scan, separated by spaces |
 | `comment` | `false` | Comment on the pull request and keep that comment updated |
 | `fail-on` | empty | `not-ready` or `caveats` fails the job; the comment is still posted |
+| `fail-on-regression` | `false` | Fail when the pull request adds a blocker or caveat finding that the base branch did not have |
 | `config` | empty | Config file; defaults to `.spot-readiness.yaml` in the repository root |
 | `include-system` | `false` | Also analyze `kube-system` and the other system namespaces |
 | `version` | the action's version | A release such as `v0.6.0`; with a branch ref it uses the latest release |
@@ -251,6 +252,43 @@ ready with caveats. Jobs, CronJobs and ScaledJobs are not counted: they request 
 weighing them like always-on services would overstate their share. The link in the output opens the
 [Kubernetes savings calculator](https://www.robertasoliman.com/en/tools/kubernetes-savings-calculator)
 with that number filled in as the interruption-tolerant share.
+
+## Regressions (`--baseline`)
+
+A project that already has 30 findings cannot fail its build on them, but it can refuse new ones.
+`scan --baseline report.json` compares the scan with an earlier `-f json` report and adds the
+average workload score of both, the findings that are new and the ones that were resolved (a finding
+is a rule on a workload). `--fail-on-regression` exits 1 when a new finding is a blocker or a
+caveat; new info findings are shown but never fail the build.
+
+```bash
+spot-readiness scan -f json ./k8s > baseline.json          # on the base branch
+spot-readiness scan --baseline baseline.json --fail-on-regression ./k8s
+```
+
+```
+COMPARISON WITH BASELINE
+
+Baseline: 87
+Current:  78
+Change:   -9
+
+NEW FINDINGS
+
++ SR004 [caveat] shop/deployment/api-prod
+
+RESOLVED
+
+- SR005 [caveat] shop/deployment/checkout-api
+```
+
+The GitHub Action does this on its own for `pull_request` events: it scans the base commit in a
+separate worktree (with the pull request's config, so changing the config cannot fake an improvement),
+adds the comparison to the comment and, with `fail-on-regression: "true"`, fails the job after
+posting it. The checkout does not need full history, since the action fetches the base commit. A path
+that did not exist on the base branch counts as empty, so everything in it is new. If the base cannot
+be scanned, the action warns and skips the comparison, except with `fail-on-regression`, which then
+fails rather than pass without checking. A workload that is renamed shows as new and resolved.
 
 ## Configuration (`.spot-readiness.yaml`)
 

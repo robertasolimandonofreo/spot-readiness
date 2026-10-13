@@ -26,6 +26,8 @@ type Summary struct {
 	Caveats  int `json:"readyWithCaveats"`
 	NotReady int `json:"notReady"`
 	Skipped  int `json:"skipped"`
+	// AverageScore is the mean workload score.
+	AverageScore int `json:"averageScore"`
 	// IgnoredFindings counts the findings that the configuration file silenced.
 	IgnoredFindings int `json:"ignoredFindings,omitempty"`
 	// CPUMilli and PotentialCPU cover long-running workloads only. Jobs and CronJobs request CPU
@@ -45,6 +47,8 @@ type Report struct {
 	Karpenter []karpenter.Result `json:"karpenter,omitempty"`
 	// Interruption is the cluster-level assessment, present in cluster mode or with --interruption.
 	Interruption *interruption.Assessment `json:"interruption,omitempty"`
+	// Comparison is set when a baseline was given (scan --baseline).
+	Comparison *Comparison `json:"comparison,omitempty"`
 }
 
 func Build(results []rules.Result, skipped int) Report {
@@ -71,6 +75,7 @@ func Build(results []rules.Result, skipped int) Report {
 			s.NotReady++
 		}
 	}
+	s.AverageScore = AverageScore(results)
 	if s.CPUMilli > 0 {
 		s.PotentialPercent = int((s.PotentialCPU*100 + s.CPUMilli/2) / s.CPUMilli)
 		s.CalculatorURL = fmt.Sprintf("%s?tolerant=%d", calculatorURL, s.PotentialPercent)
@@ -168,6 +173,7 @@ func Markdown(w io.Writer, r Report) {
 		}
 	}
 
+	comparisonMarkdown(w, r.Comparison)
 	if a := r.Interruption; a != nil {
 		fmt.Fprint(w, "\n### Interruption handling\n\n")
 		for _, row := range interruptionRows(a) {
@@ -220,6 +226,7 @@ func Table(w io.Writer, r Report, verbose bool) {
 	runtimeRisk(w, r.Results, verbose)
 	nodePools(w, r.Karpenter, verbose)
 	interruptionHandling(w, r.Interruption)
+	comparisonTable(w, r.Comparison)
 
 	if verbose {
 		fmt.Fprintln(w)

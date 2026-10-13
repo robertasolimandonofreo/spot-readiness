@@ -18,6 +18,9 @@ inputs:
   config:
     description: Config file (see .spot-readiness.yaml in the README). Defaults to .spot-readiness.yaml in the repository root, when present. Its thresholds fail the job after the comment is posted.
     default: ""
+  fail-on-regression:
+    description: Fail the job when the pull request adds a blocker or caveat finding that the base branch did not have. Existing findings never fail it, so a legacy project can adopt the check. The comment is still posted.
+    default: "false"
   include-system:
     description: Also analyze kube-system, kube-public and kube-node-lease.
     default: "false"
@@ -41,6 +44,10 @@ outputs:
   not-ready:
     description: Number of workloads that are not ready.
     value: ${{ steps.scan.outputs.not-ready }}
+  new-findings:
+    description: Findings the pull request added compared with the base branch (empty outside pull requests).
+    value: ${{ steps.scan.outputs.new-findings }}
+
 runs:
   using: composite
   steps:
@@ -94,21 +101,61 @@ runs:
         INPUT_FAIL_ON: ${{ inputs.fail-on }}
         INPUT_INCLUDE_SYSTEM: ${{ inputs.include-system }}
         INPUT_CONFIG: ${{ inputs.config }}
+        INPUT_FAIL_ON_REGRESSION: ${{ inputs.fail-on-regression }}
+        EVENT_NAME: ${{ github.event_name }}
+        BASE_SHA: ${{ github.event.pull_request.base.sha }}
       run: |
         set -uo pipefail
         flags=()
         [ "$INPUT_INCLUDE_SYSTEM" = "true" ] && flags+=(--include-system)
-        [ -n "$INPUT_CONFIG" ] && flags+=(--config "$INPUT_CONFIG")
+        # The pull request's own config is used for both scans, so changing it cannot fake a regression.
+        config="$INPUT_CONFIG"
+        if [ -z "$config" ]; then
+          for c in .spot-readiness.yaml .spot-readiness.yml; do
+            if [ -f "$c" ]; then config="$c"; break; fi
+          done
+        fi
+        [ -n "$config" ] && flags+=(--config "$(realpath "$config")")
+
+        # On a pull request, scan the base commit too and compare. Its thresholds do not matter
+        # here (exit 1 is fine); only the findings do.
+        compare=()
+        if [ "$EVENT_NAME" = "pull_request" ] && [ -n "$BASE_SHA" ]; then
+          base_dir="$RUNNER_TEMP/spot-readiness-base"
+          baseline="$RUNNER_TEMP/spot-readiness-baseline.json"
+          if git fetch --no-tags --depth=1 origin "$BASE_SHA" >/dev/null 2>&1 \
+            && git worktree add --detach "$base_dir" "$BASE_SHA" >/dev/null 2>&1; then
+            base_paths=()
+            # shellcheck disable=SC2086
+            for p in $INPUT_PATH; do [ -e "$base_dir/$p" ] && base_paths+=("$p"); done
+            if [ ${#base_paths[@]} -eq 0 ]; then
+              # Nothing to scan existed on the base branch: everything in the pull request is new.
+              echo '{"summary":{},"results":[]}' > "$baseline"
+              compare=(--baseline "$baseline")
+            else
+              (cd "$base_dir" && spot-readiness scan ${flags[@]+"${flags[@]}"} -f json "${base_paths[@]}") > "$baseline"
+              if [ $? -le 1 ]; then compare=(--baseline "$baseline"); else echo "::warning::could not scan the base branch, so there is no comparison"; fi
+            fi
+          else
+            echo "::warning::could not fetch the base commit $BASE_SHA, so there is no comparison (does the checkout have the repository?)"
+          fi
+        fi
+        if [ "$INPUT_FAIL_ON_REGRESSION" = "true" ]; then
+          if [ ${#compare[@]} -eq 0 ]; then
+            echo "::error::fail-on-regression needs a pull_request event and a readable base commit"; exit 1
+          fi
+          compare+=(--fail-on-regression)
+        fi
         # Word splitting of the path input is intended: it is a space-separated list.
         # shellcheck disable=SC2086
-        spot-readiness scan ${flags[@]+"${flags[@]}"} -f markdown $INPUT_PATH > "$RUNNER_TEMP/spot-readiness-report.md"
+        spot-readiness scan ${flags[@]+"${flags[@]}"} ${compare[@]+"${compare[@]}"} -f markdown $INPUT_PATH > "$RUNNER_TEMP/spot-readiness-report.md"
         status=$?
-        # Exit 1 means a threshold from the config file was not met: still comment, fail afterwards.
+        # Exit 1 means a config threshold or fail-on-regression was not met: still comment, fail afterwards.
         threshold_failed=false
         if [ $status -eq 1 ]; then threshold_failed=true
         elif [ $status -ne 0 ]; then cat "$RUNNER_TEMP/spot-readiness-report.md"; exit $status; fi
         # shellcheck disable=SC2086
-        spot-readiness scan ${flags[@]+"${flags[@]}"} -f json $INPUT_PATH > "$RUNNER_TEMP/spot-readiness.json"
+        spot-readiness scan ${flags[@]+"${flags[@]}"} ${compare[@]+"${compare[@]}"} -f json $INPUT_PATH > "$RUNNER_TEMP/spot-readiness.json"
 
         {
           echo "potential-percent=$(jq .summary.spotPotentialPercent "$RUNNER_TEMP/spot-readiness.json")"
@@ -116,6 +163,7 @@ runs:
           echo "caveats=$(jq .summary.readyWithCaveats "$RUNNER_TEMP/spot-readiness.json")"
           echo "not-ready=$(jq .summary.notReady "$RUNNER_TEMP/spot-readiness.json")"
           echo "threshold-failed=$threshold_failed"
+          echo "new-findings=$(jq -r '.comparison // empty | .new | length' "$RUNNER_TEMP/spot-readiness.json")"
         } >> "$GITHUB_OUTPUT"
         cat "$RUNNER_TEMP/spot-readiness-report.md" >> "$GITHUB_STEP_SUMMARY"
 
@@ -129,10 +177,10 @@ runs:
       run: |
         gh pr comment "$PR_NUMBER" --body-file "$RUNNER_TEMP/spot-readiness-report.md" --edit-last --create-if-none
 
-    - name: Apply config thresholds
+    - name: Apply config thresholds and regressions
       if: steps.scan.outputs.threshold-failed == 'true'
       shell: bash
-      run: echo "::error::the thresholds in the spot-readiness config file were not met"; exit 1
+      run: echo "::error::a threshold in the spot-readiness config file was not met, or fail-on-regression found new findings; see the report"; exit 1
 
     - name: Apply fail-on
       if: inputs.fail-on != ''
