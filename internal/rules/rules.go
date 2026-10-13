@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	corev1 "k8s.io/api/core/v1"
+	policyv1 "k8s.io/api/policy/v1"
 )
 
 type Severity string
@@ -40,6 +41,8 @@ var Descriptions = []struct{ ID, Severity, Text string }{
 	{"SR011", "info", "Job with activeDeadlineSeconds: retries after an interruption count against the deadline"},
 	{"SR012", "info", "Job without a podFailurePolicy that ignores DisruptionTarget: interruptions can count as failures"},
 	{"SR013", "info", "Job progress is lost on interruption unless the job checkpoints (cannot be verified)"},
+	{"SR014", "blocker", "PodDisruptionBudget allows zero voluntary disruptions: nodes cannot be drained"},
+	{"SR015", "caveat", "PodDisruptionBudget without unhealthyPodEvictionPolicy AlwaysAllow: unhealthy pods can block a drain"},
 }
 
 type Finding struct {
@@ -137,6 +140,29 @@ var all = []rule{
 		}
 		if !inv.HasPDB(w) {
 			return f("SR005", Caveat, "no PodDisruptionBudget: draining can remove too many replicas at once")
+		}
+		return nil
+	}},
+	{"SR014", scopeService, func(inv *Inventory, w Workload) *Finding {
+		replicas := inv.MinReplicas(w)
+		if replicas <= 1 && w.Replicas <= 1 {
+			return nil
+		}
+		for _, p := range inv.MatchingPDBs(w) {
+			if blocksAllEvictions(p, replicas) {
+				return f("SR014", Blocker, "PodDisruptionBudget %q (%s) allows no voluntary disruption with %d replicas: draining a node will hang", p.Name, pdbLimit(p), replicas)
+			}
+		}
+		return nil
+	}},
+	{"SR015", scopeService, func(inv *Inventory, w Workload) *Finding {
+		if inv.MinReplicas(w) <= 1 && w.Replicas <= 1 {
+			return nil
+		}
+		for _, p := range inv.MatchingPDBs(w) {
+			if pol := p.Spec.UnhealthyPodEvictionPolicy; pol == nil || *pol != policyv1.AlwaysAllow {
+				return f("SR015", Caveat, "PodDisruptionBudget %q does not set unhealthyPodEvictionPolicy: AlwaysAllow, so a pod that is running but not ready can block a drain", p.Name)
+			}
 		}
 		return nil
 	}},

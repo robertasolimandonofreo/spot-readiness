@@ -9,6 +9,7 @@ import (
 	policyv1 "k8s.io/api/policy/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
+	"k8s.io/apimachinery/pkg/util/intstr"
 )
 
 // Workload is the common view of a Deployment, StatefulSet, Argo Rollout, Job, CronJob or bare Pod.
@@ -133,8 +134,10 @@ func (inv *Inventory) MinReplicas(w Workload) int32 {
 	return w.Replicas
 }
 
-// HasPDB reports whether a PodDisruptionBudget selects the workload's pods.
-func (inv *Inventory) HasPDB(w Workload) bool {
+// MatchingPDBs returns the PodDisruptionBudgets in the workload's namespace whose selector
+// matches its pods. An empty selector selects nothing here, like a missing one.
+func (inv *Inventory) MatchingPDBs(w Workload) []policyv1.PodDisruptionBudget {
+	var out []policyv1.PodDisruptionBudget
 	for _, p := range inv.PDBs {
 		if namespaceOrDefault(p.Namespace) != w.Namespace || p.Spec.Selector == nil {
 			continue
@@ -144,8 +147,45 @@ func (inv *Inventory) HasPDB(w Workload) bool {
 			continue
 		}
 		if sel.Matches(labels.Set(w.Template.Labels)) {
-			return true
+			out = append(out, p)
 		}
 	}
-	return false
+	return out
+}
+
+// HasPDB reports whether a PodDisruptionBudget selects the workload's pods.
+func (inv *Inventory) HasPDB(w Workload) bool {
+	return len(inv.MatchingPDBs(w)) > 0
+}
+
+// blocksAllEvictions reports whether the budget allows no voluntary disruption when the workload
+// runs the given number of replicas. Like the disruption controller, it rounds percentages up. A
+// budget with neither field, or with an invalid value, is not judged.
+func blocksAllEvictions(p policyv1.PodDisruptionBudget, replicas int32) bool {
+	var allowed int
+	switch {
+	case p.Spec.MinAvailable != nil:
+		n, err := intstr.GetScaledValueFromIntOrPercent(p.Spec.MinAvailable, int(replicas), true)
+		if err != nil {
+			return false
+		}
+		allowed = int(replicas) - n
+	case p.Spec.MaxUnavailable != nil:
+		n, err := intstr.GetScaledValueFromIntOrPercent(p.Spec.MaxUnavailable, int(replicas), true)
+		if err != nil {
+			return false
+		}
+		allowed = n
+	default:
+		return false
+	}
+	return allowed <= 0
+}
+
+// pdbLimit describes the budget's setting for a finding message.
+func pdbLimit(p policyv1.PodDisruptionBudget) string {
+	if p.Spec.MinAvailable != nil {
+		return "minAvailable " + p.Spec.MinAvailable.String()
+	}
+	return "maxUnavailable " + p.Spec.MaxUnavailable.String()
 }

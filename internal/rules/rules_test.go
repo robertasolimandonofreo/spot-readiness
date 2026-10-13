@@ -8,6 +8,7 @@ import (
 	policyv1 "k8s.io/api/policy/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/util/intstr"
 )
 
 func i64(v int64) *int64 { return &v }
@@ -36,10 +37,17 @@ func healthy() Workload {
 	}
 }
 
+// pdbFor returns a budget that allows one disruption and evicts unhealthy pods, so it triggers
+// neither SR014 nor SR015.
 func pdbFor(ns string, labels map[string]string) policyv1.PodDisruptionBudget {
+	maxUnavailable, always := intstr.FromInt32(1), policyv1.AlwaysAllow
 	return policyv1.PodDisruptionBudget{
-		ObjectMeta: metav1.ObjectMeta{Namespace: ns},
-		Spec:       policyv1.PodDisruptionBudgetSpec{Selector: &metav1.LabelSelector{MatchLabels: labels}},
+		ObjectMeta: metav1.ObjectMeta{Namespace: ns, Name: "web"},
+		Spec: policyv1.PodDisruptionBudgetSpec{
+			Selector:                   &metav1.LabelSelector{MatchLabels: labels},
+			MaxUnavailable:             &maxUnavailable,
+			UnhealthyPodEvictionPolicy: &always,
+		},
 	}
 }
 
@@ -90,6 +98,33 @@ func TestRules(t *testing.T) {
 		{"pdb in another namespace does not count", func(_ *Workload, inv *Inventory) {
 			inv.PDBs = []policyv1.PodDisruptionBudget{pdbFor("other", map[string]string{"app": "web"})}
 		}, "SR005", Caveat},
+		{"minAvailable equal to replicas", func(_ *Workload, inv *Inventory) {
+			v := intstr.FromInt32(3)
+			inv.PDBs[0].Spec.MaxUnavailable, inv.PDBs[0].Spec.MinAvailable = nil, &v
+		}, "SR014", Blocker},
+		{"minAvailable 100 percent", func(_ *Workload, inv *Inventory) {
+			v := intstr.FromString("100%")
+			inv.PDBs[0].Spec.MaxUnavailable, inv.PDBs[0].Spec.MinAvailable = nil, &v
+		}, "SR014", Blocker},
+		{"maxUnavailable zero", func(_ *Workload, inv *Inventory) {
+			v := intstr.FromInt32(0)
+			inv.PDBs[0].Spec.MaxUnavailable = &v
+		}, "SR014", Blocker},
+		{"maxUnavailable small percent rounds up to one", func(_ *Workload, inv *Inventory) {
+			v := intstr.FromString("10%")
+			inv.PDBs[0].Spec.MaxUnavailable = &v
+		}, "", ""},
+		{"minAvailable below replicas is fine", func(_ *Workload, inv *Inventory) {
+			v := intstr.FromInt32(2)
+			inv.PDBs[0].Spec.MaxUnavailable, inv.PDBs[0].Spec.MinAvailable = nil, &v
+		}, "", ""},
+		{"default unhealthy pod eviction policy", func(_ *Workload, inv *Inventory) {
+			inv.PDBs[0].Spec.UnhealthyPodEvictionPolicy = nil
+		}, "SR015", Caveat},
+		{"IfHealthyBudget policy", func(_ *Workload, inv *Inventory) {
+			p := policyv1.IfHealthyBudget
+			inv.PDBs[0].Spec.UnhealthyPodEvictionPolicy = &p
+		}, "SR015", Caveat},
 		{"no readiness probe", func(w *Workload, _ *Inventory) { w.Template.Spec.Containers[0].ReadinessProbe = nil }, "SR006", Caveat},
 		{"pvc volume", func(w *Workload, _ *Inventory) {
 			w.Template.Spec.Volumes = []corev1.Volume{{Name: "d", VolumeSource: corev1.VolumeSource{PersistentVolumeClaim: &corev1.PersistentVolumeClaimVolumeSource{ClaimName: "d"}}}}
@@ -269,7 +304,7 @@ func TestJobsSkipServiceRules(t *testing.T) {
 	w.Template.Spec.Containers[0].Lifecycle = nil
 	w.Template.Spec.TopologySpreadConstraints = nil
 	got := ids(Evaluate(&Inventory{}, w))
-	for _, id := range []string{"SR001", "SR004", "SR005", "SR006", "SR009"} {
+	for _, id := range []string{"SR001", "SR004", "SR005", "SR006", "SR009", "SR014", "SR015"} {
 		if _, ok := got[id]; ok {
 			t.Errorf("%s is a service rule and must not apply to a Job", id)
 		}

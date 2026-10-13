@@ -157,8 +157,10 @@ least 50 points.
 | SR011 | info | Job with `activeDeadlineSeconds`: retries after an interruption count against it |
 | SR012 | info | No `podFailurePolicy` that ignores `DisruptionTarget`: an interruption can count against `backoffLimit` |
 | SR013 | info | Progress is lost on interruption unless the job checkpoints (cannot be verified) |
+| SR014 | blocker | A matching PodDisruptionBudget allows zero voluntary disruptions (for example `minAvailable` equal to the replicas): nodes cannot be drained |
+| SR015 | caveat | A matching PodDisruptionBudget without `unhealthyPodEvictionPolicy: AlwaysAllow`: a running but not ready pod can block a drain |
 
-SR001, SR004, SR005, SR006 and SR009 apply to long-running workloads (Deployments, StatefulSets,
+SR001, SR004, SR005, SR006, SR009, SR014 and SR015 apply to long-running workloads (Deployments, StatefulSets,
 Argo Rollouts and bare Pods). SR010 to SR013 apply to Jobs, CronJobs and KEDA ScaledJobs. SR002, SR003, SR007 and
 SR008 apply to all of them.
 
