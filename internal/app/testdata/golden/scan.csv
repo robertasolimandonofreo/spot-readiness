@@ -1,0 +1,4 @@
+verdict,score,namespace,kind,name,replicas,cpu_request_millis,already_on_spot,findings,flexibility_score,runtime_resilience,confidence
+not-ready,15,shop,StatefulSet,db,1,2000,false,SR001;SR006;SR007;SR009,100,,low
+not-ready,35,shop,Deployment,worker,2,2000,false,SR003;SR004;SR005;SR006;SR009,100,,high
+ready,100,shop,Deployment,web,3,1500,false,,100,,high

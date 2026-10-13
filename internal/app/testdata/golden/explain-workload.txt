@@ -1,0 +1,23 @@
+shop/deployment/worker
+
+Score calculation
+
+   100  starting score
+   -15  SR003 (caveat)  terminationGracePeriodSeconds is 300s, but Spot gives only 120s of notice
+   -15  SR004 (caveat)  no topology spread or pod anti-affinity: replicas can land on the same node or zone
+   -15  SR005 (caveat)  no PodDisruptionBudget: draining can remove too many replicas at once
+   -15  SR006 (caveat)  container "worker" has no readinessProbe: traffic can reach a pod that is not ready
+    -5  SR009 (info)  no preStop hook: in-flight requests may be cut when the node is reclaimed
+  ------
+    35  final score
+
+  A blocker costs 50 points, a caveat 15 and an info 5.
+
+Verdict: not-ready
+  no blocker, but the caveats (SR003, SR004, SR005, SR006) took the score below 50, and that many caveats together are not "ready with caveats" any more
+
+Confidence: high
+  nothing the manifest cannot show lowers it
+
+Spot flexibility: 100 (low constraints): any zone, any instance family
+  It is separate from the score: only SR016 to SR019 affect the score.

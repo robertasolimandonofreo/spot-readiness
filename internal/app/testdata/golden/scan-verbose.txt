@@ -1,0 +1,113 @@
+VERDICT    SCORE  CONFIDENCE  WORKLOAD                REPLICAS  CPU    SPOT  FINDINGS
+not-ready  15     low         shop/statefulset/db     1         2000m  -     SR001,SR006,SR007,SR009
+not-ready  35     high        shop/deployment/worker  2         2000m  -     SR003,SR004,SR005,SR006,SR009
+ready      100    high        shop/deployment/web     3         1500m  -     
+
+shop/statefulset/db
+  SR001 [blocker] runs with 1 replica: an interruption means downtime (testdata/sample.yaml:50)
+    Suggested remediation:
+      Run at least 2 replicas (3 across zones is better), or give the HPA minReplicas: 2.
+
+      # StatefulSet: spec
+      replicas: 2
+    Docs: https://kubernetes.io/docs/concepts/workloads/controllers/deployment/
+  SR006 [caveat] container "db" has no readinessProbe: traffic can reach a pod that is not ready (testdata/sample.yaml:57)
+    Suggested remediation:
+      Add a readinessProbe so traffic only reaches pods that can serve it. Point it at your health endpoint.
+
+      # spec.template.spec.containers[db]
+      readinessProbe:
+        httpGet:
+          path: /healthz
+          port: 8080
+        periodSeconds: 5
+        failureThreshold: 3
+    Docs: https://kubernetes.io/docs/tasks/configure-pod-container/configure-liveness-readiness-startup-probes/
+  SR007 [caveat] uses persistent volumes: zonal disks make rescheduling slower and tied to one zone (testdata/sample.yaml:60)
+    Suggested remediation:
+      A zonal volume keeps the pod in one zone and slows rescheduling. Keep this workload on on-demand nodes, or accept slower recovery.
+
+      # spec.template.spec
+      nodeSelector:
+        karpenter.sh/capacity-type: on-demand
+    Docs: https://kubernetes.io/docs/concepts/storage/persistent-volumes/
+  SR009 [info] no preStop hook: in-flight requests may be cut when the node is reclaimed (testdata/sample.yaml:56)
+    Suggested remediation:
+      Add a short preStop sleep so the endpoint is removed from load balancers before the process gets SIGTERM.
+
+      # spec.template.spec.containers[db]
+      lifecycle:
+        preStop:
+          exec:
+            command: ["sleep", "15"]
+    Docs: https://kubernetes.io/docs/concepts/containers/container-lifecycle-hooks/
+shop/deployment/worker
+  SR003 [caveat] terminationGracePeriodSeconds is 300s, but Spot gives only 120s of notice (testdata/sample.yaml:40)
+    Suggested remediation:
+      Make the application exit on SIGTERM within the 2-minute Spot notice and lower the grace period.
+
+      # spec.template.spec
+      terminationGracePeriodSeconds: 90
+    Docs: https://kubernetes.io/docs/concepts/workloads/pods/pod-lifecycle/
+  SR004 [caveat] no topology spread or pod anti-affinity: replicas can land on the same node or zone (testdata/sample.yaml:39)
+    Suggested remediation:
+      Spread the replicas across zones and nodes.
+
+      # spec.template.spec
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: topology.kubernetes.io/zone
+          whenUnsatisfiable: ScheduleAnyway
+          labelSelector:
+            matchLabels:
+              app: worker
+        - maxSkew: 1
+          topologyKey: kubernetes.io/hostname
+          whenUnsatisfiable: ScheduleAnyway
+          labelSelector:
+            matchLabels:
+              app: worker
+    Docs: https://kubernetes.io/docs/concepts/scheduling-eviction/topology-spread-constraints/
+  SR005 [caveat] no PodDisruptionBudget: draining can remove too many replicas at once (testdata/sample.yaml:33)
+    Suggested remediation:
+      Add a PodDisruptionBudget so a drain removes one replica at a time.
+
+      apiVersion: policy/v1
+      kind: PodDisruptionBudget
+      metadata:
+        name: worker
+        namespace: shop
+      spec:
+        maxUnavailable: 1
+        unhealthyPodEvictionPolicy: AlwaysAllow
+        selector:
+          matchLabels:
+            app: worker
+    Docs: https://kubernetes.io/docs/tasks/run-application/configure-pdb/
+  SR006 [caveat] container "worker" has no readinessProbe: traffic can reach a pod that is not ready (testdata/sample.yaml:42)
+    Suggested remediation:
+      Add a readinessProbe so traffic only reaches pods that can serve it. Point it at your health endpoint.
+
+      # spec.template.spec.containers[worker]
+      readinessProbe:
+        httpGet:
+          path: /healthz
+          port: 8080
+        periodSeconds: 5
+        failureThreshold: 3
+    Docs: https://kubernetes.io/docs/tasks/configure-pod-container/configure-liveness-readiness-startup-probes/
+  SR009 [info] no preStop hook: in-flight requests may be cut when the node is reclaimed (testdata/sample.yaml:41)
+    Suggested remediation:
+      Add a short preStop sleep so the endpoint is removed from load balancers before the process gets SIGTERM.
+
+      # spec.template.spec.containers[worker]
+      lifecycle:
+        preStop:
+          exec:
+            command: ["sleep", "15"]
+    Docs: https://kubernetes.io/docs/concepts/containers/container-lifecycle-hooks/
+
+3 workloads: 1 ready, 0 with caveats, 2 not ready (1 skipped)
+Spot potential: 27% of requested CPU in long-running workloads (ready or with caveats; Jobs, CronJobs and ScaledJobs excluded).
+Estimate the savings: https://www.robertasoliman.com/en/tools/kubernetes-savings-calculator?tolerant=27
+Ready does not mean safe: this tool only sees configuration, not how your application behaves.

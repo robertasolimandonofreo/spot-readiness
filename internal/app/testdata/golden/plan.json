@@ -1,0 +1,99 @@
+{
+  "schemaVersion": "1",
+  "toolVersion": "v9.9.9",
+  "summary": {
+    "workloads": 3,
+    "readyNow": 1,
+    "readyAfterChanges": 1,
+    "manualReview": 1,
+    "keepOnDemand": 0,
+    "cpuRequestMillis": 5500,
+    "immediateCpuMillis": 1500,
+    "potentialCpuMillis": 3500,
+    "manualReviewCpuMillis": 2000,
+    "immediatePercent": 27,
+    "potentialPercent": 64
+  },
+  "prerequisites": [
+    "NodePool prod-app (KR001): supports only one Availability Zone: that zone running out of Spot capacity leaves the pool without nodes",
+    "NodePool prod-app (KR002): allows only 2 instance families (at least 3 recommended)",
+    "NodePool prod-app (KR003): allows only 4 instance types (AWS recommends at least 10 for Spot)"
+  ],
+  "phase1": [
+    {
+      "namespace": "shop",
+      "kind": "Deployment",
+      "name": "web",
+      "batch": false,
+      "replicas": 3,
+      "cpuRequestMillis": 1500,
+      "score": 100,
+      "confidence": "high",
+      "alreadyOnSpot": false,
+      "priority": 1.5
+    }
+  ],
+  "phase2": [
+    {
+      "namespace": "shop",
+      "kind": "Deployment",
+      "name": "worker",
+      "batch": false,
+      "replicas": 2,
+      "cpuRequestMillis": 2000,
+      "score": 35,
+      "confidence": "high",
+      "alreadyOnSpot": false,
+      "priority": 0.18,
+      "rank": 1,
+      "changes": [
+        {
+          "rule": "SR003",
+          "severity": "caveat",
+          "action": "Make the application exit on SIGTERM within the 2-minute Spot notice and lower the grace period.",
+          "remediation": "Make the application exit on SIGTERM within the 2-minute Spot notice and lower the grace period.\n\n# spec.template.spec\nterminationGracePeriodSeconds: 90"
+        },
+        {
+          "rule": "SR004",
+          "severity": "caveat",
+          "action": "Spread the replicas across zones and nodes.",
+          "remediation": "Spread the replicas across zones and nodes.\n\n# spec.template.spec\ntopologySpreadConstraints:\n  - maxSkew: 1\n    topologyKey: topology.kubernetes.io/zone\n    whenUnsatisfiable: ScheduleAnyway\n    labelSelector:\n      matchLabels:\n        app: worker\n  - maxSkew: 1\n    topologyKey: kubernetes.io/hostname\n    whenUnsatisfiable: ScheduleAnyway\n    labelSelector:\n      matchLabels:\n        app: worker"
+        },
+        {
+          "rule": "SR005",
+          "severity": "caveat",
+          "action": "Add a PodDisruptionBudget so a drain removes one replica at a time.",
+          "remediation": "Add a PodDisruptionBudget so a drain removes one replica at a time.\n\napiVersion: policy/v1\nkind: PodDisruptionBudget\nmetadata:\n  name: worker\n  namespace: shop\nspec:\n  maxUnavailable: 1\n  unhealthyPodEvictionPolicy: AlwaysAllow\n  selector:\n    matchLabels:\n      app: worker"
+        },
+        {
+          "rule": "SR006",
+          "severity": "caveat",
+          "action": "Add a readinessProbe so traffic only reaches pods that can serve it. Point it at your health endpoint.",
+          "remediation": "Add a readinessProbe so traffic only reaches pods that can serve it. Point it at your health endpoint.\n\n# spec.template.spec.containers[worker]\nreadinessProbe:\n  httpGet:\n    path: /healthz\n    port: 8080\n  periodSeconds: 5\n  failureThreshold: 3"
+        }
+      ]
+    }
+  ],
+  "manualReview": [
+    {
+      "namespace": "shop",
+      "kind": "StatefulSet",
+      "name": "db",
+      "batch": false,
+      "replicas": 1,
+      "cpuRequestMillis": 2000,
+      "score": 15,
+      "confidence": "low",
+      "alreadyOnSpot": false,
+      "priority": 0.12,
+      "reason": "Persistent state detected: uses persistent volumes: zonal disks make rescheduling slower and tied to one zone",
+      "review": [
+        "storage topology (zonal disks, storage class, volume binding)",
+        "replication and quorum: how many copies, and whether the rest keeps serving when one is lost",
+        "recovery time: how long a replacement pod takes to be useful again",
+        "availability zone dependency: whether the volume pins the pod to one zone"
+      ]
+    }
+  ],
+  "keepOnDemand": []
+}

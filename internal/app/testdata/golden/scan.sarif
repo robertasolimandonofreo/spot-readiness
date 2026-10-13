@@ -1,0 +1,479 @@
+{
+  "$schema": "https://json.schemastore.org/sarif-2.1.0.json",
+  "version": "2.1.0",
+  "runs": [
+    {
+      "tool": {
+        "driver": {
+          "name": "spot-readiness",
+          "version": "v9.9.9",
+          "informationUri": "https://github.com/robertasolimandonofreo/spot-readiness",
+          "rules": [
+            {
+              "id": "SR001",
+              "helpUri": "https://kubernetes.io/docs/concepts/workloads/controllers/deployment/",
+              "shortDescription": {
+                "text": "Fewer than 2 replicas (an HPA minimum counts), or a bare Pod"
+              },
+              "defaultConfiguration": {
+                "level": "error"
+              }
+            },
+            {
+              "id": "SR002",
+              "helpUri": "https://kubernetes.io/docs/concepts/storage/volumes/",
+              "shortDescription": {
+                "text": "hostPath volumes: the data is lost with the node"
+              },
+              "defaultConfiguration": {
+                "level": "error"
+              }
+            },
+            {
+              "id": "SR003",
+              "helpUri": "https://kubernetes.io/docs/concepts/workloads/pods/pod-lifecycle/",
+              "shortDescription": {
+                "text": "terminationGracePeriodSeconds above 120s; Spot gives a 2-minute notice"
+              },
+              "defaultConfiguration": {
+                "level": "warning"
+              }
+            },
+            {
+              "id": "SR004",
+              "helpUri": "https://kubernetes.io/docs/concepts/scheduling-eviction/topology-spread-constraints/",
+              "shortDescription": {
+                "text": "Several replicas with no topology spread or pod anti-affinity"
+              },
+              "defaultConfiguration": {
+                "level": "warning"
+              }
+            },
+            {
+              "id": "SR005",
+              "helpUri": "https://kubernetes.io/docs/tasks/run-application/configure-pdb/",
+              "shortDescription": {
+                "text": "Several replicas with no matching PodDisruptionBudget"
+              },
+              "defaultConfiguration": {
+                "level": "warning"
+              }
+            },
+            {
+              "id": "SR006",
+              "helpUri": "https://kubernetes.io/docs/tasks/configure-pod-container/configure-liveness-readiness-startup-probes/",
+              "shortDescription": {
+                "text": "A container without a readinessProbe"
+              },
+              "defaultConfiguration": {
+                "level": "warning"
+              }
+            },
+            {
+              "id": "SR007",
+              "helpUri": "https://kubernetes.io/docs/concepts/storage/persistent-volumes/",
+              "shortDescription": {
+                "text": "Persistent volumes: zonal disks reschedule slower and stay in one zone"
+              },
+              "defaultConfiguration": {
+                "level": "warning"
+              }
+            },
+            {
+              "id": "SR008",
+              "helpUri": "https://kubernetes.io/docs/concepts/configuration/manage-resources-containers/",
+              "shortDescription": {
+                "text": "A container without CPU or memory requests"
+              },
+              "defaultConfiguration": {
+                "level": "note"
+              }
+            },
+            {
+              "id": "SR009",
+              "helpUri": "https://kubernetes.io/docs/concepts/containers/container-lifecycle-hooks/",
+              "shortDescription": {
+                "text": "No preStop hook in any container"
+              },
+              "defaultConfiguration": {
+                "level": "note"
+              }
+            },
+            {
+              "id": "SR010",
+              "helpUri": "https://kubernetes.io/docs/concepts/workloads/controllers/job/",
+              "shortDescription": {
+                "text": "Job with backoffLimit 0: a single lost pod fails the whole job"
+              },
+              "defaultConfiguration": {
+                "level": "error"
+              }
+            },
+            {
+              "id": "SR011",
+              "helpUri": "https://kubernetes.io/docs/concepts/workloads/controllers/job/",
+              "shortDescription": {
+                "text": "Job with activeDeadlineSeconds: retries after an interruption count against the deadline"
+              },
+              "defaultConfiguration": {
+                "level": "note"
+              }
+            },
+            {
+              "id": "SR012",
+              "helpUri": "https://kubernetes.io/docs/concepts/workloads/controllers/job/",
+              "shortDescription": {
+                "text": "Job without a podFailurePolicy that ignores DisruptionTarget: interruptions can count as failures"
+              },
+              "defaultConfiguration": {
+                "level": "note"
+              }
+            },
+            {
+              "id": "SR013",
+              "helpUri": "https://kubernetes.io/docs/concepts/workloads/controllers/job/",
+              "shortDescription": {
+                "text": "Job progress is lost on interruption unless the job checkpoints (cannot be verified)"
+              },
+              "defaultConfiguration": {
+                "level": "note"
+              }
+            },
+            {
+              "id": "SR014",
+              "helpUri": "https://kubernetes.io/docs/tasks/run-application/configure-pdb/",
+              "shortDescription": {
+                "text": "PodDisruptionBudget allows zero voluntary disruptions: nodes cannot be drained"
+              },
+              "defaultConfiguration": {
+                "level": "error"
+              }
+            },
+            {
+              "id": "SR015",
+              "helpUri": "https://kubernetes.io/docs/tasks/run-application/configure-pdb/",
+              "shortDescription": {
+                "text": "PodDisruptionBudget without unhealthyPodEvictionPolicy AlwaysAllow: unhealthy pods can block a drain"
+              },
+              "defaultConfiguration": {
+                "level": "warning"
+              }
+            },
+            {
+              "id": "SR016",
+              "helpUri": "https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/spot-best-practices.html",
+              "shortDescription": {
+                "text": "Workload is restricted to a single Availability Zone"
+              },
+              "defaultConfiguration": {
+                "level": "warning"
+              }
+            },
+            {
+              "id": "SR017",
+              "helpUri": "https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/spot-best-practices.html",
+              "shortDescription": {
+                "text": "Workload requires a specific instance type (or node)"
+              },
+              "defaultConfiguration": {
+                "level": "warning"
+              }
+            },
+            {
+              "id": "SR018",
+              "helpUri": "https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/spot-best-practices.html",
+              "shortDescription": {
+                "text": "Workload limits Spot capacity flexibility: few instance types or families, or GPUs"
+              },
+              "defaultConfiguration": {
+                "level": "note"
+              }
+            },
+            {
+              "id": "SR019",
+              "helpUri": "https://kubernetes.io/docs/concepts/scheduling-eviction/assign-pod-node/",
+              "shortDescription": {
+                "text": "Required nodeSelector and nodeAffinity pin down three or more aspects of the placement"
+              },
+              "defaultConfiguration": {
+                "level": "warning"
+              }
+            }
+          ]
+        }
+      },
+      "results": [
+        {
+          "ruleId": "SR001",
+          "ruleIndex": 0,
+          "level": "error",
+          "message": {
+            "text": "runs with 1 replica: an interruption means downtime"
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "testdata/sample.yaml",
+                  "uriBaseId": "%SRCROOT%"
+                },
+                "region": {
+                  "startLine": 50
+                }
+              },
+              "logicalLocations": [
+                {
+                  "fullyQualifiedName": "shop/statefulset/db",
+                  "kind": "statefulset"
+                }
+              ]
+            }
+          ],
+          "partialFingerprints": {
+            "spotReadiness/v1": "939e14934c9837dcf3389b99cf274ec2"
+          }
+        },
+        {
+          "ruleId": "SR006",
+          "ruleIndex": 5,
+          "level": "warning",
+          "message": {
+            "text": "container \"db\" has no readinessProbe: traffic can reach a pod that is not ready"
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "testdata/sample.yaml",
+                  "uriBaseId": "%SRCROOT%"
+                },
+                "region": {
+                  "startLine": 57
+                }
+              },
+              "logicalLocations": [
+                {
+                  "fullyQualifiedName": "shop/statefulset/db",
+                  "kind": "statefulset"
+                }
+              ]
+            }
+          ],
+          "partialFingerprints": {
+            "spotReadiness/v1": "2d914cf4d8f25404f712bebe29eec4b0"
+          }
+        },
+        {
+          "ruleId": "SR007",
+          "ruleIndex": 6,
+          "level": "warning",
+          "message": {
+            "text": "uses persistent volumes: zonal disks make rescheduling slower and tied to one zone"
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "testdata/sample.yaml",
+                  "uriBaseId": "%SRCROOT%"
+                },
+                "region": {
+                  "startLine": 60
+                }
+              },
+              "logicalLocations": [
+                {
+                  "fullyQualifiedName": "shop/statefulset/db",
+                  "kind": "statefulset"
+                }
+              ]
+            }
+          ],
+          "partialFingerprints": {
+            "spotReadiness/v1": "e5d2cf758416de49b6aff9b2d13e2e46"
+          }
+        },
+        {
+          "ruleId": "SR009",
+          "ruleIndex": 8,
+          "level": "note",
+          "message": {
+            "text": "no preStop hook: in-flight requests may be cut when the node is reclaimed"
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "testdata/sample.yaml",
+                  "uriBaseId": "%SRCROOT%"
+                },
+                "region": {
+                  "startLine": 56
+                }
+              },
+              "logicalLocations": [
+                {
+                  "fullyQualifiedName": "shop/statefulset/db",
+                  "kind": "statefulset"
+                }
+              ]
+            }
+          ],
+          "partialFingerprints": {
+            "spotReadiness/v1": "89757576b90a1a8bbdd05b7dd22034ab"
+          }
+        },
+        {
+          "ruleId": "SR003",
+          "ruleIndex": 2,
+          "level": "warning",
+          "message": {
+            "text": "terminationGracePeriodSeconds is 300s, but Spot gives only 120s of notice"
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "testdata/sample.yaml",
+                  "uriBaseId": "%SRCROOT%"
+                },
+                "region": {
+                  "startLine": 40
+                }
+              },
+              "logicalLocations": [
+                {
+                  "fullyQualifiedName": "shop/deployment/worker",
+                  "kind": "deployment"
+                }
+              ]
+            }
+          ],
+          "partialFingerprints": {
+            "spotReadiness/v1": "cbe9efca629599a1b34bb55df01019c8"
+          }
+        },
+        {
+          "ruleId": "SR004",
+          "ruleIndex": 3,
+          "level": "warning",
+          "message": {
+            "text": "no topology spread or pod anti-affinity: replicas can land on the same node or zone"
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "testdata/sample.yaml",
+                  "uriBaseId": "%SRCROOT%"
+                },
+                "region": {
+                  "startLine": 39
+                }
+              },
+              "logicalLocations": [
+                {
+                  "fullyQualifiedName": "shop/deployment/worker",
+                  "kind": "deployment"
+                }
+              ]
+            }
+          ],
+          "partialFingerprints": {
+            "spotReadiness/v1": "73dc855b98f11d2aae9b4fc8b6d37c77"
+          }
+        },
+        {
+          "ruleId": "SR005",
+          "ruleIndex": 4,
+          "level": "warning",
+          "message": {
+            "text": "no PodDisruptionBudget: draining can remove too many replicas at once"
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "testdata/sample.yaml",
+                  "uriBaseId": "%SRCROOT%"
+                },
+                "region": {
+                  "startLine": 33
+                }
+              },
+              "logicalLocations": [
+                {
+                  "fullyQualifiedName": "shop/deployment/worker",
+                  "kind": "deployment"
+                }
+              ]
+            }
+          ],
+          "partialFingerprints": {
+            "spotReadiness/v1": "bb1303faae08c82c5c8aafb53aa90171"
+          }
+        },
+        {
+          "ruleId": "SR006",
+          "ruleIndex": 5,
+          "level": "warning",
+          "message": {
+            "text": "container \"worker\" has no readinessProbe: traffic can reach a pod that is not ready"
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "testdata/sample.yaml",
+                  "uriBaseId": "%SRCROOT%"
+                },
+                "region": {
+                  "startLine": 42
+                }
+              },
+              "logicalLocations": [
+                {
+                  "fullyQualifiedName": "shop/deployment/worker",
+                  "kind": "deployment"
+                }
+              ]
+            }
+          ],
+          "partialFingerprints": {
+            "spotReadiness/v1": "89edbf0d56542979d38c4dad4c5eae2c"
+          }
+        },
+        {
+          "ruleId": "SR009",
+          "ruleIndex": 8,
+          "level": "note",
+          "message": {
+            "text": "no preStop hook: in-flight requests may be cut when the node is reclaimed"
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "testdata/sample.yaml",
+                  "uriBaseId": "%SRCROOT%"
+                },
+                "region": {
+                  "startLine": 41
+                }
+              },
+              "logicalLocations": [
+                {
+                  "fullyQualifiedName": "shop/deployment/worker",
+                  "kind": "deployment"
+                }
+              ]
+            }
+          ],
+          "partialFingerprints": {
+            "spotReadiness/v1": "fe910686e66c25dea30200b9ce54d0f5"
+          }
+        }
+      ]
+    }
+  ]
+}

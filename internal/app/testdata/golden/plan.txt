@@ -1,0 +1,40 @@
+SPOT MIGRATION PLAN
+
+Total workloads:             3
+Ready now:                   1
+Ready after changes:         1
+Manual review:               1
+Keep on on-demand:           0
+
+Requested CPU:               5.5 vCPU
+Immediately movable to Spot: 1.5 vCPU (27%)
+Potential after changes:     3.5 vCPU (64%)
+Waiting for a review:        2 vCPU (not in the potential)
+(CPU of long-running workloads; Jobs and CronJobs are listed but not counted)
+
+Phase 0: prepare the platform
+  - NodePool prod-app (KR001): supports only one Availability Zone: that zone running out of Spot capacity leaves the pool without nodes
+  - NodePool prod-app (KR002): allows only 2 instance families (at least 3 recommended)
+  - NodePool prod-app (KR003): allows only 4 instance types (AWS recommends at least 10 for Spot)
+
+Phase 1: move now (safest first)
+  shop/deployment/web  (1.5 vCPU, confidence high)
+
+Phase 2: move after these changes (best return for the effort first)
+  1. shop/deployment/worker  (2 vCPU, 4 changes, score 35, confidence high)
+       SR003  Make the application exit on SIGTERM within the 2-minute Spot notice and lower the grace period.
+       SR004  Spread the replicas across zones and nodes.
+       SR005  Add a PodDisruptionBudget so a drain removes one replica at a time.
+       SR006  Add a readinessProbe so traffic only reaches pods that can serve it. Point it at your health endpoint.
+
+Manual review
+  shop/statefulset/db  (2 vCPU, confidence low)
+    Persistent state detected: uses persistent volumes: zonal disks make rescheduling slower and tied to one zone
+
+  Before deciding, look at:
+    - storage topology (zonal disks, storage class, volume binding)
+    - replication and quorum: how many copies, and whether the rest keeps serving when one is lost
+    - recovery time: how long a replacement pod takes to be useful again
+    - availability zone dependency: whether the volume pins the pod to one zone
+
+The plan reads configuration only: test each move, start with a few replicas, and keep on-demand capacity as a fallback.

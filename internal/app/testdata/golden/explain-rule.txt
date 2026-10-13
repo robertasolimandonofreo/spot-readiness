@@ -1,0 +1,21 @@
+SR014: PodDisruptionBudget allows zero voluntary disruptions
+
+Severity
+  blocker
+
+Why it matters
+  If the budget allows no eviction, a node holding the workload cannot be drained: a Karpenter consolidation, a node upgrade or the handling of an interruption notice waits on the budget until the node is gone anyway.
+
+Detected when
+  A PodDisruptionBudget that selects the workload leaves no allowed disruption at the workload's minimum replica count (for example minAvailable equal to the replicas, or maxUnavailable 0). Percentages round up, like the disruption controller.
+
+Example problematic configuration
+  spec:
+    minAvailable: 3   # with replicas: 3
+
+Recommended configuration
+  spec:
+    maxUnavailable: 1
+
+References
+  https://kubernetes.io/docs/tasks/run-application/configure-pdb/

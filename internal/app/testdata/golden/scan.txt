@@ -1,0 +1,9 @@
+VERDICT    SCORE  CONFIDENCE  WORKLOAD                REPLICAS  CPU    SPOT  FINDINGS
+not-ready  15     low         shop/statefulset/db     1         2000m  -     SR001,SR006,SR007,SR009
+not-ready  35     high        shop/deployment/worker  2         2000m  -     SR003,SR004,SR005,SR006,SR009
+ready      100    high        shop/deployment/web     3         1500m  -     
+
+3 workloads: 1 ready, 0 with caveats, 2 not ready (1 skipped)
+Spot potential: 27% of requested CPU in long-running workloads (ready or with caveats; Jobs, CronJobs and ScaledJobs excluded).
+Estimate the savings: https://www.robertasoliman.com/en/tools/kubernetes-savings-calculator?tolerant=27
+Ready does not mean safe: this tool only sees configuration, not how your application behaves.

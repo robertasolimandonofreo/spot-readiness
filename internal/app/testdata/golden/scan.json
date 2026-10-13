@@ -1,0 +1,233 @@
+{
+  "schemaVersion": "1",
+  "toolVersion": "v9.9.9",
+  "summary": {
+    "workloads": 3,
+    "batch": 0,
+    "ready": 1,
+    "readyWithCaveats": 0,
+    "notReady": 2,
+    "skipped": 1,
+    "averageScore": 50,
+    "cpuRequestMillis": 5500,
+    "spotPotentialCpuMillis": 1500,
+    "spotPotentialPercent": 27,
+    "calculatorUrl": "https://www.robertasoliman.com/en/tools/kubernetes-savings-calculator?tolerant=27"
+  },
+  "results": [
+    {
+      "kind": "StatefulSet",
+      "namespace": "shop",
+      "name": "db",
+      "replicas": 1,
+      "batch": false,
+      "cpuRequestMillis": 2000,
+      "alreadyOnSpot": false,
+      "score": 15,
+      "verdict": "not-ready",
+      "findings": [
+        {
+          "rule": "SR001",
+          "severity": "blocker",
+          "message": "runs with 1 replica: an interruption means downtime",
+          "file": "testdata/sample.yaml",
+          "line": 50,
+          "remediation": "Run at least 2 replicas (3 across zones is better), or give the HPA minReplicas: 2.\n\n# StatefulSet: spec\nreplicas: 2",
+          "docsUrl": "https://kubernetes.io/docs/concepts/workloads/controllers/deployment/"
+        },
+        {
+          "rule": "SR006",
+          "severity": "caveat",
+          "message": "container \"db\" has no readinessProbe: traffic can reach a pod that is not ready",
+          "file": "testdata/sample.yaml",
+          "line": 57,
+          "remediation": "Add a readinessProbe so traffic only reaches pods that can serve it. Point it at your health endpoint.\n\n# spec.template.spec.containers[db]\nreadinessProbe:\n  httpGet:\n    path: /healthz\n    port: 8080\n  periodSeconds: 5\n  failureThreshold: 3",
+          "docsUrl": "https://kubernetes.io/docs/tasks/configure-pod-container/configure-liveness-readiness-startup-probes/"
+        },
+        {
+          "rule": "SR007",
+          "severity": "caveat",
+          "message": "uses persistent volumes: zonal disks make rescheduling slower and tied to one zone",
+          "file": "testdata/sample.yaml",
+          "line": 60,
+          "remediation": "A zonal volume keeps the pod in one zone and slows rescheduling. Keep this workload on on-demand nodes, or accept slower recovery.\n\n# spec.template.spec\nnodeSelector:\n  karpenter.sh/capacity-type: on-demand",
+          "docsUrl": "https://kubernetes.io/docs/concepts/storage/persistent-volumes/"
+        },
+        {
+          "rule": "SR009",
+          "severity": "info",
+          "message": "no preStop hook: in-flight requests may be cut when the node is reclaimed",
+          "file": "testdata/sample.yaml",
+          "line": 56,
+          "remediation": "Add a short preStop sleep so the endpoint is removed from load balancers before the process gets SIGTERM.\n\n# spec.template.spec.containers[db]\nlifecycle:\n  preStop:\n    exec:\n      command: [\"sleep\", \"15\"]",
+          "docsUrl": "https://kubernetes.io/docs/concepts/containers/container-lifecycle-hooks/"
+        }
+      ],
+      "flexibility": {
+        "score": 100,
+        "zones": 0,
+        "families": [],
+        "constraints": "low"
+      },
+      "confidence": "low",
+      "confidenceReasons": [
+        "persistent state: the manifest does not show how the application replicates or recovers it",
+        "StatefulSet: pod identity and ordering matter, and the manifest does not show how much"
+      ]
+    },
+    {
+      "kind": "Deployment",
+      "namespace": "shop",
+      "name": "worker",
+      "replicas": 2,
+      "batch": false,
+      "cpuRequestMillis": 2000,
+      "alreadyOnSpot": false,
+      "score": 35,
+      "verdict": "not-ready",
+      "findings": [
+        {
+          "rule": "SR003",
+          "severity": "caveat",
+          "message": "terminationGracePeriodSeconds is 300s, but Spot gives only 120s of notice",
+          "file": "testdata/sample.yaml",
+          "line": 40,
+          "remediation": "Make the application exit on SIGTERM within the 2-minute Spot notice and lower the grace period.\n\n# spec.template.spec\nterminationGracePeriodSeconds: 90",
+          "docsUrl": "https://kubernetes.io/docs/concepts/workloads/pods/pod-lifecycle/"
+        },
+        {
+          "rule": "SR004",
+          "severity": "caveat",
+          "message": "no topology spread or pod anti-affinity: replicas can land on the same node or zone",
+          "file": "testdata/sample.yaml",
+          "line": 39,
+          "remediation": "Spread the replicas across zones and nodes.\n\n# spec.template.spec\ntopologySpreadConstraints:\n  - maxSkew: 1\n    topologyKey: topology.kubernetes.io/zone\n    whenUnsatisfiable: ScheduleAnyway\n    labelSelector:\n      matchLabels:\n        app: worker\n  - maxSkew: 1\n    topologyKey: kubernetes.io/hostname\n    whenUnsatisfiable: ScheduleAnyway\n    labelSelector:\n      matchLabels:\n        app: worker",
+          "docsUrl": "https://kubernetes.io/docs/concepts/scheduling-eviction/topology-spread-constraints/"
+        },
+        {
+          "rule": "SR005",
+          "severity": "caveat",
+          "message": "no PodDisruptionBudget: draining can remove too many replicas at once",
+          "file": "testdata/sample.yaml",
+          "line": 33,
+          "remediation": "Add a PodDisruptionBudget so a drain removes one replica at a time.\n\napiVersion: policy/v1\nkind: PodDisruptionBudget\nmetadata:\n  name: worker\n  namespace: shop\nspec:\n  maxUnavailable: 1\n  unhealthyPodEvictionPolicy: AlwaysAllow\n  selector:\n    matchLabels:\n      app: worker",
+          "docsUrl": "https://kubernetes.io/docs/tasks/run-application/configure-pdb/"
+        },
+        {
+          "rule": "SR006",
+          "severity": "caveat",
+          "message": "container \"worker\" has no readinessProbe: traffic can reach a pod that is not ready",
+          "file": "testdata/sample.yaml",
+          "line": 42,
+          "remediation": "Add a readinessProbe so traffic only reaches pods that can serve it. Point it at your health endpoint.\n\n# spec.template.spec.containers[worker]\nreadinessProbe:\n  httpGet:\n    path: /healthz\n    port: 8080\n  periodSeconds: 5\n  failureThreshold: 3",
+          "docsUrl": "https://kubernetes.io/docs/tasks/configure-pod-container/configure-liveness-readiness-startup-probes/"
+        },
+        {
+          "rule": "SR009",
+          "severity": "info",
+          "message": "no preStop hook: in-flight requests may be cut when the node is reclaimed",
+          "file": "testdata/sample.yaml",
+          "line": 41,
+          "remediation": "Add a short preStop sleep so the endpoint is removed from load balancers before the process gets SIGTERM.\n\n# spec.template.spec.containers[worker]\nlifecycle:\n  preStop:\n    exec:\n      command: [\"sleep\", \"15\"]",
+          "docsUrl": "https://kubernetes.io/docs/concepts/containers/container-lifecycle-hooks/"
+        }
+      ],
+      "flexibility": {
+        "score": 100,
+        "zones": 0,
+        "families": [],
+        "constraints": "low"
+      },
+      "confidence": "high",
+      "confidenceReasons": []
+    },
+    {
+      "kind": "Deployment",
+      "namespace": "shop",
+      "name": "web",
+      "replicas": 3,
+      "batch": false,
+      "cpuRequestMillis": 1500,
+      "alreadyOnSpot": false,
+      "score": 100,
+      "verdict": "ready",
+      "findings": [],
+      "flexibility": {
+        "score": 100,
+        "zones": 0,
+        "families": [],
+        "constraints": "low"
+      },
+      "confidence": "high",
+      "confidenceReasons": []
+    }
+  ],
+  "karpenter": [
+    {
+      "nodePool": "monitoring",
+      "capacity": "on-demand",
+      "zones": 0,
+      "instanceFamilies": 0,
+      "instanceTypes": 0,
+      "nodeClaims": 0,
+      "score": null,
+      "findings": []
+    },
+    {
+      "nodePool": "prod-app",
+      "capacity": "spot",
+      "zones": 1,
+      "instanceFamilies": 2,
+      "instanceTypes": 4,
+      "nodeClaims": 0,
+      "score": 45,
+      "findings": [
+        {
+          "rule": "KR001",
+          "severity": "caveat",
+          "message": "supports only one Availability Zone: that zone running out of Spot capacity leaves the pool without nodes",
+          "remediation": "Let the NodePool use every zone that has a subnet, or list at least two.\n\n# NodePool spec.template.spec.requirements\n- key: topology.kubernetes.io/zone\n  operator: In\n  values: [\"\u003czone-a\u003e\", \"\u003czone-b\u003e\", \"\u003czone-c\u003e\"]",
+          "docsUrl": "https://karpenter.sh/docs/concepts/nodepools/"
+        },
+        {
+          "rule": "KR002",
+          "severity": "caveat",
+          "message": "allows only 2 instance families (at least 3 recommended)",
+          "remediation": "Allow several instance categories and make Karpenter keep a minimum of families.\n\n# NodePool spec.template.spec.requirements\n- key: karpenter.k8s.aws/instance-category\n  operator: In\n  values: [\"c\", \"m\", \"r\"]\n- key: karpenter.k8s.aws/instance-family\n  operator: Exists\n  minValues: 5",
+          "docsUrl": "https://karpenter.sh/docs/concepts/nodepools/"
+        },
+        {
+          "rule": "KR003",
+          "severity": "caveat",
+          "message": "allows only 4 instance types (AWS recommends at least 10 for Spot)",
+          "remediation": "List more instance types, or better, constrain by category and generation and let Karpenter pick the types.\n\n# NodePool spec.template.spec.requirements\n- key: karpenter.k8s.aws/instance-category\n  operator: In\n  values: [\"c\", \"m\", \"r\"]\n- key: karpenter.k8s.aws/instance-generation\n  operator: Gt\n  values: [\"2\"]\n- key: node.kubernetes.io/instance-type\n  operator: Exists\n  minValues: 10",
+          "docsUrl": "https://karpenter.sh/docs/concepts/nodepools/"
+        },
+        {
+          "rule": "KR005",
+          "severity": "info",
+          "message": "no explicit disruption budget: Karpenter applies its default of 10% of nodes at a time",
+          "remediation": "Set a disruption budget that fits you. Remove a budget of 0 nodes that is always active, or limit it with a schedule.\n\n# NodePool spec.disruption\nbudgets:\n  - nodes: \"10%\"\n  - nodes: \"0\"          # block voluntary disruption only during business hours\n    schedule: \"0 9 * * mon-fri\"\n    duration: 8h",
+          "docsUrl": "https://karpenter.sh/docs/concepts/disruption/"
+        },
+        {
+          "rule": "KR007",
+          "severity": "info",
+          "message": "no minValues on instance type, family or category: nothing makes Karpenter keep a minimum of instance diversity",
+          "remediation": "Make Karpenter keep a minimum of instance diversity.\n\n# NodePool spec.template.spec.requirements\n- key: karpenter.k8s.aws/instance-family\n  operator: Exists\n  minValues: 5",
+          "docsUrl": "https://karpenter.sh/docs/concepts/nodepools/"
+        }
+      ]
+    },
+    {
+      "nodePool": "workers",
+      "capacity": "on-demand,spot",
+      "zones": 0,
+      "instanceFamilies": 0,
+      "instanceTypes": 0,
+      "nodeClaims": 0,
+      "score": 100,
+      "findings": []
+    }
+  ]
+}
