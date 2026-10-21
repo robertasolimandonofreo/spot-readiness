@@ -145,7 +145,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - id: spot
-        uses: robertasolimandonofreo/spot-readiness@v0.8.0
+        uses: robertasolimandonofreo/spot-readiness@v0.8.2
         with:
           path: ./k8s            # files or directories, separated by spaces
           comment: "true"        # one comment, updated on every push
@@ -455,7 +455,7 @@ permissions:
   security-events: write
 steps:
   - uses: actions/checkout@v4
-  - uses: robertasolimandonofreo/spot-readiness@v0.8.0
+  - uses: robertasolimandonofreo/spot-readiness@v0.8.2
     with:
       path: k8s
       upload-sarif: "true"
