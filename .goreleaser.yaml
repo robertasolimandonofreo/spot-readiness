@@ -32,3 +32,16 @@ changelog:
   sort: asc
   filters:
     exclude: ["^docs:", "^chore:", "^test:"]
+
+brews:
+  - name: spot-readiness
+    repository:
+      owner: robertasolimandonofreo
+      name: homebrew-tap
+      token: "{{ .Env.HOMEBREW_TAP_TOKEN }}"
+    directory: Formula
+    homepage: https://www.robertasoliman.com/en/tools/spot-readiness
+    description: "Find out which Kubernetes workloads can safely run on Spot"
+    license: Apache-2.0
+    test: |
+      system "#{bin}/spot-readiness", "version"

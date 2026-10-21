@@ -612,6 +612,11 @@ SPOT_READINESS_CONTEXT=kind-spot-readiness-it go test -tags integration -count=1
 
 It applies objects, so it refuses to run against a context that is not named `kind-...`.
 
+## More
+
+- Guide and examples: https://www.robertasoliman.com/en/tools/spot-readiness
+- Article: https://www.robertasoliman.com/en/blog/spot-readiness-which-workloads-run-on-spot
+
 ## License
 
 Apache-2.0. See [LICENSE](LICENSE).
