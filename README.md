@@ -25,7 +25,13 @@ that reads the capacity type of a node; it is not started.
 
 ## Install
 
-Download a binary for Linux, macOS or Windows (amd64 and arm64) from the
+With Homebrew (macOS and Linux):
+
+```bash
+brew install robertasolimandonofreo/tap/spot-readiness
+```
+
+Or download a binary for Linux, macOS or Windows (amd64 and arm64) from the
 [releases page](https://github.com/robertasolimandonofreo/spot-readiness/releases), and check it
 against `checksums.txt`:
 
